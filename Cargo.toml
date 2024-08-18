@@ -1,0 +1,9 @@
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Nicholas Crothers <ncrothers523@gmail.com>"]
+repository = "https://github.com/ncrothers/tonic-flatbuffers.git"
+license = "MIT"
+
+[workspace]
+members = ["tonic-flatbuffers", "tonic-flatbuffers-build", "examples/helloworld"]

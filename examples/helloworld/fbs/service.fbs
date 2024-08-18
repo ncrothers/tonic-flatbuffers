@@ -1,0 +1,21 @@
+namespace example.service;
+
+table Request {
+    foo:uint;
+    bar:string;
+}
+
+table Response {
+    foo:uint;
+    bar:string;
+}
+
+root_type Request;
+root_type Response;
+
+rpc_service HelloWorldStreaming {
+    HelloSingle(Request):Response (streaming: "none");
+    HelloStreamServer(Request): Response (streaming: "server");
+    HelloStreamClient(Request): Response (streaming: "client");
+    HelloStreamBidirectional(Request): Response (streaming: "bidi");
+}

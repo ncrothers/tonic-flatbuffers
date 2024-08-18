@@ -1,0 +1,16 @@
+[package]
+name = "tonic-flatbuffers-build"
+description = "Generates tonic-compatible gRPC stubs for flatbuffers RPC services."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+flatbuffers-build = "0.2.0"
+itertools = "0.13.0"
+prettyplease = "0.2.20"
+regex = "1.10.6"
+syn = { version = "2.0.74" }
+tonic-build = "0.12.1"
