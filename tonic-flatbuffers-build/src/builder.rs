@@ -310,6 +310,10 @@ impl Builder {
                 }
             }
 
+            if service_bufs.is_empty() {
+                continue;
+            }
+
             let mut fake_types: HashMap<String, HashSet<String>> = HashMap::new();
             let mut file_str = String::new();
             let mut file_namespace = String::new();
