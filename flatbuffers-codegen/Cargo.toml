@@ -7,3 +7,4 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+winnow = "0.6.18"
