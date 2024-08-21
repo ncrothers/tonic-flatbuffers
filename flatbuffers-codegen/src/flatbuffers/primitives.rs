@@ -57,18 +57,8 @@ where
         literal(":").parse_next(input)?;
         consume_whitespace_and_comments(input)?;
 
-        let length_start = input.checkpoint();
-        let length = digit1(input)?.parse().map_err(|_| {
-            ErrMode::Backtrack(
-                ContextError::new()
-                    .add_context(input, &length_start, StrContext::Label("array length"))
-                    .add_context(
-                        input,
-                        &length_start,
-                        StrContext::Expected(StrContextValue::Description("unsigned integer")),
-                    ),
-            )
-        })?;
+        // let length_start = input.checkpoint();
+        let length = Parser::parse_to(digit1).parse_next(input)?;
 
         consume_whitespace_and_comments(input)?;
         // Try to consume a closing square bracket

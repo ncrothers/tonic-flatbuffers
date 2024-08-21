@@ -50,6 +50,11 @@ impl IdentParser {
     pub fn is_valid(input: char) -> bool {
         input.is_ascii_alphanumeric() || input == '_'
     }
+
+    /// Checks whether the character is valid in the context of a namespaced ident.
+    pub fn is_valid_namespace(input: char) -> bool {
+        Self::is_valid(input) || input == '.'
+    }
 }
 
 impl<'s, E> Parser<&'s str, <&'s str as Stream>::Slice, E> for IdentParser

@@ -80,21 +80,9 @@ where
 
             consume_whitespace_and_comments(input)?;
 
-            let before_parse = input.checkpoint();
+            let idx = Parser::parse_to(digit1).parse_next(input)?;
 
-            let idx = digit1(input)?;
-
-            Some(idx.parse().map_err(|_| {
-                ErrMode::Backtrack(
-                    ContextError::new()
-                        .add_context(input, &before_parse, StrContext::Label("enum index"))
-                        .add_context(
-                            input,
-                            &before_parse,
-                            StrContext::Expected(StrContextValue::Description(T::type_name())),
-                        ),
-                )
-            })?)
+            Some(idx)
         } else {
             None
         };

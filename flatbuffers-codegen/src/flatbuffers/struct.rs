@@ -71,9 +71,9 @@ where
     }
 }
 
-pub struct ParseStruct;
+pub struct StructParser;
 
-impl<'s, E> Parser<&'s str, Struct<'s>, E> for ParseStruct
+impl<'s, E> Parser<&'s str, Struct<'s>, E> for StructParser
 where
     E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
     ErrMode<E>: From<ErrMode<ContextError>>,
@@ -197,7 +197,7 @@ mod tests {
 
         for (item_str, item) in valid {
             let value = item_str;
-            let res = ParseStruct.parse(value).inspect_err(|e| println!("{e}"));
+            let res = StructParser.parse(value).inspect_err(|e| println!("{e}"));
             assert_eq!(res, Ok(item));
         }
 
@@ -221,7 +221,7 @@ mod tests {
 
         for item in invalid {
             let mut value = item;
-            assert!(ParseStruct.parse_next(&mut value).is_err());
+            assert!(StructParser.parse_next(&mut value).is_err());
         }
     }
 }
