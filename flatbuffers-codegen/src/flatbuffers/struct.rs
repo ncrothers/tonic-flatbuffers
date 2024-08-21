@@ -71,7 +71,7 @@ where
     }
 }
 
-struct ParseStruct;
+pub struct ParseStruct;
 
 impl<'s, E> Parser<&'s str, Struct<'s>, E> for ParseStruct
 where
@@ -196,7 +196,7 @@ mod tests {
         let valid = [(struct1_str, struct1), (struct2_str, struct2)];
 
         for (item_str, item) in valid {
-            let mut value = item_str;
+            let value = item_str;
             let res = ParseStruct.parse(value).inspect_err(|e| println!("{e}"));
             assert_eq!(res, Ok(item));
         }

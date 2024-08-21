@@ -1,7 +1,6 @@
 use winnow::{
     combinator::{opt, preceded},
     error::{AddContext, ContextError, ErrMode, ParserError, StrContext},
-    seq,
     token::literal,
     PResult, Parser,
 };
@@ -70,7 +69,7 @@ where
     }
 }
 
-struct TableParser;
+pub struct TableParser;
 
 impl<'s, E> Parser<&'s str, Table<'s>, E> for TableParser
 where
@@ -116,9 +115,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::flatbuffers::primitives::{
-        Array, ArrayItemType, BuiltInTable, ScalarType, VectorItemType,
-    };
+    use crate::flatbuffers::primitives::{ScalarType, VectorItemType};
 
     use super::*;
 
