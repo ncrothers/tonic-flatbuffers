@@ -1,6 +1,6 @@
 use winnow::{
-    combinator::{opt, preceded},
-    error::{AddContext, ContextError, ErrMode, ParserError, StrContext},
+    combinator::{opt, preceded, trace},
+    error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
     token::literal,
     PResult, Parser,
 };
@@ -42,11 +42,12 @@ where
         let comments = consume_whitespace_and_comments(input)?;
         // Get the field ident
         let ident = parse_ident(input)?;
+        consume_whitespace_and_comments(input)?;
 
         literal(":").parse_next(input)?;
 
         consume_whitespace_and_comments(input)?;
-        // Consume the opening bracket
+
         let field_type = ParseTypeIdent.parse_next(input)?;
 
         consume_whitespace_and_comments(input)?;
@@ -77,39 +78,46 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Table<'s>, E> {
-        let comments = consume_whitespace_and_comments(input)?;
-        // Parse the keyword
-        literal("table").parse_next(input)?;
+        trace("table", |input: &mut _| {
+            let comments = consume_whitespace_and_comments(input)?;
+            // Parse the keyword
+            literal("table")
+                .context(StrContext::Expected(StrContextValue::StringLiteral(
+                    "table",
+                )))
+                .parse_next(input)?;
 
-        // Get the struct ident
-        let ident = parse_ident(input)?;
+            // Get the struct ident
+            let ident = parse_ident(input)?;
 
-        let attrs = opt(AttributeSectionParser).parse_next(input)?;
+            let attrs = opt(AttributeSectionParser).parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
-        // Consume the opening bracket
-        literal("{").parse_next(input)?;
+            consume_whitespace_and_comments(input)?;
+            // Consume the opening bracket
+            literal("{").parse_next(input)?;
 
-        // Consume whitespace instead of comments here so the any comments get
-        // added to the field
-        consume_whitespace(input)?;
+            // Consume whitespace instead of comments here so the any comments get
+            // added to the field
+            consume_whitespace(input)?;
 
-        let mut fields = Vec::new();
+            let mut fields = Vec::new();
 
-        // Consume as many table fields as possible
-        while let Some(field) = opt(TableFieldParser).parse_next(input)? {
-            fields.push(field);
-        }
+            // Consume as many table fields as possible
+            while let Some(field) = opt(TableFieldParser).parse_next(input)? {
+                fields.push(field);
+            }
 
-        consume_whitespace_and_comments(input)?;
-        literal("}").parse_next(input)?;
+            consume_whitespace_and_comments(input)?;
+            literal("}").parse_next(input)?;
 
-        Ok(Table {
-            name: ident,
-            fields,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(Table {
+                name: ident,
+                fields,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
+        .parse_next(input)
     }
 }
 

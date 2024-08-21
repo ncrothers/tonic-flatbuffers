@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use winnow::{
     ascii::digit1,
-    combinator::{opt, separated},
+    combinator::{opt, separated, trace},
     error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
     stream::Stream,
     token::literal,
@@ -108,79 +108,83 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Enum<'s>, E> {
-        let comments = consume_whitespace_and_comments(input)?;
+        trace("enum", |input: &mut _| {
+            let comments = consume_whitespace_and_comments(input)?;
 
-        literal("enum").parse_next(input)?;
-        consume_whitespace_and_comments(input)?;
+            literal("enum").parse_next(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        let ident = parse_ident(input)?;
+            let ident = parse_ident(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        let attrs = opt(AttributeSectionParser).parse_next(input)?;
-        consume_whitespace_and_comments(input)?;
+            literal(":")
+                .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
+                .parse_next(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        literal(":")
-            .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
-            .parse_next(input)?;
-        consume_whitespace_and_comments(input)?;
+            let before_scalar = input.checkpoint();
 
-        let before_scalar = input.checkpoint();
+            let scalar = ParseScalarType.parse_next(input)?;
 
-        let scalar = ParseScalarType.parse_next(input)?;
+            if !scalar.is_integer() {
+                return Err(ErrMode::Backtrack(
+                    ContextError::new()
+                        .add_context(input, &before_scalar, StrContext::Label("enum type"))
+                        .add_context(
+                            input,
+                            &before_scalar,
+                            StrContext::Expected(StrContextValue::Description("integer type")),
+                        ),
+                )
+                .into());
+            }
 
-        if !scalar.is_integer() {
-            return Err(ErrMode::Backtrack(
-                ContextError::new()
-                    .add_context(input, &before_scalar, StrContext::Label("enum type"))
-                    .add_context(
-                        input,
-                        &before_scalar,
-                        StrContext::Expected(StrContextValue::Description("integer type")),
-                    ),
-            )
-            .into());
-        }
+            let attrs = opt(AttributeSectionParser).parse_next(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        consume_whitespace_and_comments(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        literal("{")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
-            .parse_next(input)?;
+            literal("{")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
+                .parse_next(input)?;
 
-        fn parse_variants<'s, T: FromStr + TypeName>(
-            input: &mut &'s str,
-        ) -> PResult<Vec<EnumVariant<'s, T>>> {
-            let variants = separated(0.., EnumVariantParser, ",").parse_next(input)?;
-            // Consume a trailing comma, if present
-            opt(literal(",")).parse_next(input)?;
+            fn parse_variants<'s, T: FromStr + TypeName>(
+                input: &mut &'s str,
+            ) -> PResult<Vec<EnumVariant<'s, T>>> {
+                let variants = separated(0.., EnumVariantParser, ",").parse_next(input)?;
+                // Consume a trailing comma, if present
+                opt(literal(",")).parse_next(input)?;
 
-            Ok(variants)
-        }
+                Ok(variants)
+            }
 
-        // Parse variants according to the data type
-        let variants = match scalar {
-            ScalarType::Int8 => EnumData::Int8(parse_variants(input)?),
-            ScalarType::UInt8 => EnumData::UInt8(parse_variants(input)?),
-            ScalarType::Int16 => EnumData::Int16(parse_variants(input)?),
-            ScalarType::UInt16 => EnumData::UInt16(parse_variants(input)?),
-            ScalarType::Int32 => EnumData::Int32(parse_variants(input)?),
-            ScalarType::UInt32 => EnumData::UInt32(parse_variants(input)?),
-            ScalarType::Int64 => EnumData::Int64(parse_variants(input)?),
-            ScalarType::UInt64 => EnumData::UInt64(parse_variants(input)?),
-            _ => unreachable!(),
-        };
+            // Parse variants according to the data type
+            let variants = match scalar {
+                ScalarType::Int8 => EnumData::Int8(parse_variants(input)?),
+                ScalarType::UInt8 => EnumData::UInt8(parse_variants(input)?),
+                ScalarType::Int16 => EnumData::Int16(parse_variants(input)?),
+                ScalarType::UInt16 => EnumData::UInt16(parse_variants(input)?),
+                ScalarType::Int32 => EnumData::Int32(parse_variants(input)?),
+                ScalarType::UInt32 => EnumData::UInt32(parse_variants(input)?),
+                ScalarType::Int64 => EnumData::Int64(parse_variants(input)?),
+                ScalarType::UInt64 => EnumData::UInt64(parse_variants(input)?),
+                _ => unreachable!(),
+            };
 
-        consume_whitespace_and_comments(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        literal("}")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
-            .parse_next(input)?;
+            literal("}")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
+                .parse_next(input)?;
 
-        Ok(Enum {
-            name: ident,
-            variants,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(Enum {
+                name: ident,
+                variants,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
+        .parse_next(input)
     }
 }
 

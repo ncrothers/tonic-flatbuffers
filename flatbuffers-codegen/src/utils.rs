@@ -1,6 +1,6 @@
 use winnow::{
     ascii::till_line_ending,
-    combinator::{delimited, eof, not, repeat},
+    combinator::{delimited, eof, not, repeat, trace},
     error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
     stream::{AsChar, Compare, Stream, StreamIsPartial},
     token::{literal, one_of, take_till, take_while},
@@ -40,7 +40,10 @@ where
         // Remove whitespace at the front
         take_while(0.., |c| AsChar::is_space(c)).parse_next(input)?;
 
-        take_while(1.., |c| !AsChar::is_space(c)).parse_next(input)
+        take_while(1.., |c: char| {
+            !AsChar::is_space(c) && !(c.is_ascii_punctuation() && c != '_')
+        })
+        .parse_next(input)
     }
 }
 
@@ -85,29 +88,32 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Option<&'s str>, E> {
-        consume_whitespace(input)?;
-        // Consume the comment start
-        literal("//").parse_next(input)?;
+        trace("comment_parser", |input: &mut _| {
+            consume_whitespace(input)?;
+            // Consume the comment start
+            literal("//").parse_next(input)?;
 
-        // If we still have another / left, this is documentation, and should be kept
-        let is_doc = input.starts_with('/');
+            // If we still have another / left, this is documentation, and should be kept
+            let is_doc = input.starts_with('/');
 
-        // Remove the leading slash when it's a documentation comment
-        if is_doc {
-            literal("/").parse_next(input)?;
-        }
+            // Remove the leading slash when it's a documentation comment
+            if is_doc {
+                literal("/").parse_next(input)?;
+            }
 
-        // Consume whitespace until comment
-        take_while(0.., (AsChar::is_newline, AsChar::is_space)).parse_next(input)?;
+            // Consume whitespace until comment
+            take_while(0.., AsChar::is_space).parse_next(input)?;
 
-        let comment = till_line_ending(input)?;
+            let comment = till_line_ending(input)?;
 
-        // Only return the comment if it was documentation
-        if is_doc {
-            Ok(Some(comment))
-        } else {
-            Ok(None)
-        }
+            // Only return the comment if it was documentation
+            if is_doc {
+                Ok(Some(comment))
+            } else {
+                Ok(None)
+            }
+        })
+        .parse_next(input)
     }
 }
 

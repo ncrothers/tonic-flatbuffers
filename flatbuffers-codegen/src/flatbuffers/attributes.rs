@@ -1,6 +1,6 @@
 use winnow::{
     ascii::digit1,
-    combinator::separated,
+    combinator::{separated, trace},
     error::{
         AddContext, ContextError, ErrMode, InputError, ParserError, StrContext, StrContextValue,
     },
@@ -32,7 +32,7 @@ pub enum Attribute<'a> {
 impl<'a> Attribute<'a> {
     pub fn from_ident(ident: &'a str) -> Self {
         match ident {
-            "bitflags" => Self::BitFlags,
+            "bit_flags" => Self::BitFlags,
             "deprecated" => Self::Deprecated,
             "flexbuffer" => Self::FlexBuffer,
             "force_align" => Self::ForceAlign(0),
@@ -152,7 +152,9 @@ where
                     attr.insert_value_u64(value);
                 } else if attr.is_custom() {
                     let value = take_till(1.., |c: char| {
-                        c.is_whitespace() || c.is_newline() || c == ','
+                        c.is_whitespace()
+                            || c.is_newline()
+                            || (c.is_ascii_punctuation() && c != '_')
                     })
                     .parse_next(input)?;
 
@@ -190,16 +192,19 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Vec<Attribute<'s>>, E> {
-        consume_whitespace_and_comments(input)?;
-        literal("(").parse_next(input)?;
+        trace("attribute_section", |input: &mut _| {
+            consume_whitespace_and_comments(input)?;
+            literal("(").parse_next(input)?;
 
-        let attrs = separated(1.., AttributeParser, ",").parse_next(input)?;
+            let attrs = separated(1.., AttributeParser, ",").parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        literal(")").parse_next(input)?;
+            literal(")").parse_next(input)?;
 
-        Ok(attrs)
+            Ok(attrs)
+        })
+        .parse_next(input)
     }
 }
 

@@ -1,11 +1,13 @@
 use winnow::{
-    combinator::{alt, delimited},
+    combinator::{alt, delimited, trace},
     error::{AddContext, ContextError, ErrMode, ParserError, StrContext},
     token::{literal, take_while},
     PResult, Parser,
 };
 
-use crate::utils::{consume_whitespace_and_comments, IdentParser, StringLiteral};
+use crate::utils::{
+    consume_whitespace, consume_whitespace_and_comments, IdentParser, StringLiteral,
+};
 
 use super::{
     r#enum::{Enum, EnumParser},
@@ -17,6 +19,7 @@ use super::{
 #[derive(Debug, PartialEq)]
 pub enum Item<'a> {
     Attribute(&'a str),
+    Comment(Vec<&'a str>),
     Enum(Enum<'a>),
     FileExtension(&'a str),
     FileIdentifier(&'a str),
@@ -36,7 +39,7 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Item<'s>, E> {
-        alt((
+        let item = alt((
             AttributeDeclParser.map(Item::Attribute),
             EnumParser.map(Item::Enum),
             FileExtensionParser.map(Item::FileExtension),
@@ -48,7 +51,14 @@ where
             TableParser.map(Item::Table),
             UnionParser.map(Item::Union),
         ))
-        .parse_next(input)
+        .context(StrContext::Expected(
+            winnow::error::StrContextValue::Description("flatbuffer statement"),
+        ))
+        .parse_next(input)?;
+
+        consume_whitespace(input)?;
+
+        Ok(item)
     }
 }
 
@@ -157,17 +167,20 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<&'s str, E> {
-        consume_whitespace_and_comments(input)?;
+        trace("namespace", |input: &mut _| {
+            consume_whitespace_and_comments(input)?;
 
-        literal("namespace").parse_next(input)?;
-        consume_whitespace_and_comments(input)?;
+            literal("namespace").parse_next(input)?;
+            consume_whitespace_and_comments(input)?;
 
-        let namespace = take_while(1.., IdentParser::is_valid_namespace).parse_next(input)?;
+            let namespace = take_while(1.., IdentParser::is_valid_namespace).parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
-        literal(";").parse_next(input)?;
+            consume_whitespace_and_comments(input)?;
+            literal(";").parse_next(input)?;
 
-        Ok(namespace)
+            Ok(namespace)
+        })
+        .parse_next(input)
     }
 }
 

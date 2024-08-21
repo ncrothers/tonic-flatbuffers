@@ -1,5 +1,6 @@
 use winnow::{
     ascii::digit1,
+    combinator::trace,
     error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
     stream::Stream,
     token::literal,
@@ -138,31 +139,34 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<TableFieldType<'s>, E> {
-        consume_whitespace_and_comments(input)?;
-        // Parse as vector
-        let val = if input.starts_with('[') {
-            let ident = VectorWrapped.parse_next(input)?;
+        trace("parse_type_ident", |i: &mut _| {
+            consume_whitespace_and_comments(i)?;
+            // Parse as vector
+            let val = if i.starts_with('[') {
+                let ident = VectorWrapped.parse_next(i)?;
 
-            if ident == "string" {
-                TableFieldType::Vector(VectorItemType::String)
-            } else if let Some(scalar) = ScalarType::parse(ident) {
-                TableFieldType::Vector(VectorItemType::Scalar(scalar))
+                if ident == "string" {
+                    TableFieldType::Vector(VectorItemType::String)
+                } else if let Some(scalar) = ScalarType::parse(ident) {
+                    TableFieldType::Vector(VectorItemType::Scalar(scalar))
+                } else {
+                    TableFieldType::Vector(VectorItemType::Named(ident))
+                }
             } else {
-                TableFieldType::Vector(VectorItemType::Named(ident))
-            }
-        } else {
-            let ident = parse_ident(input)?;
+                let ident = parse_ident(i)?;
 
-            if ident == "string" {
-                TableFieldType::String
-            } else if let Some(scalar) = ScalarType::parse(ident) {
-                TableFieldType::Scalar(scalar)
-            } else {
-                TableFieldType::Named(ident)
-            }
-        };
+                if ident == "string" {
+                    TableFieldType::String
+                } else if let Some(scalar) = ScalarType::parse(ident) {
+                    TableFieldType::Scalar(scalar)
+                } else {
+                    TableFieldType::Named(ident)
+                }
+            };
 
-        Ok(val)
+            Ok(val)
+        })
+        .parse_next(input)
     }
 }
 
