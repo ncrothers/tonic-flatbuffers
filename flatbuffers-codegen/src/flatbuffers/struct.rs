@@ -1,15 +1,10 @@
 use winnow::{
-    combinator::terminated,
-    error::{AddContext, ContextError, ErrMode, StrContext},
-    seq,
-    stream::Stream,
-    token::{literal, take_while},
-    PResult, Parser,
+    combinator::opt, error::{AddContext, ContextError, ErrMode, ParserError, StrContext}, token::literal, PResult, Parser
 };
 
-use crate::utils::{consume_whitespace, consume_whitespace_and_comments, parse_ident, IdentParser};
+use crate::utils::{consume_whitespace, consume_whitespace_and_comments, parse_ident};
 
-use super::primitives::{ParseStructFieldType, StructFieldType};
+use super::{attributes::{Attribute, AttributeSectionParser}, primitives::{ParseStructFieldType, StructFieldType}};
 
 #[derive(Debug, PartialEq)]
 pub struct StructField<'a> {
@@ -23,6 +18,7 @@ pub struct Struct<'a> {
     name: &'a str,
     fields: Vec<StructField<'a>>,
     comments: Vec<&'a str>,
+    attributes: Vec<Attribute<'a>>,
 }
 
 struct StructFieldParser;
@@ -59,7 +55,7 @@ struct ParseStruct;
 
 impl<'s, E> Parser<&'s str, Struct<'s>, E> for ParseStruct
 where
-    E: AddContext<&'s str, StrContext>,
+    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Struct<'s>, E> {
@@ -69,6 +65,8 @@ where
 
         // Get the struct ident
         let ident = parse_ident(input)?;
+
+        let attrs = opt(AttributeSectionParser).parse_next(input)?;
 
         consume_whitespace_and_comments(input)?;
         // Consume the opening bracket
@@ -91,6 +89,7 @@ where
             name: ident,
             fields,
             comments,
+            attributes: attrs.unwrap_or_default(),
         })
     }
 }
@@ -117,12 +116,13 @@ mod tests {
                 comments: Vec::new(),
             }],
             comments: Vec::new(),
+            attributes: Vec::new(),
         };
 
         let struct2_str = r#"
             // This is NOT documentation
             /// This is a comment!
-            struct Hello_There {
+            struct Hello_There (force_align: 10) {
                 /// This is field documentation
                 foo:[int32:50];
                 bar:
@@ -162,6 +162,7 @@ mod tests {
                 },
             ],
             comments: vec!["This is a comment!"],
+            attributes: vec![Attribute::ForceAlign(10)],
         };
 
         let valid = [(struct1_str, struct1), (struct2_str, struct2)];
