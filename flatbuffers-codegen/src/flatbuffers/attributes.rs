@@ -1,15 +1,12 @@
-use winnow::{ascii::digit1, error::{AddContext, ContextError, ErrMode, InputError, StrContext, StrContextValue}, stream::{AsChar, Stream}, token::{literal, one_of, take_till, take_while}, PResult, Parser};
+use winnow::{
+    ascii::digit1,
+    error::{AddContext, ContextError, ErrMode, InputError, StrContext, StrContextValue},
+    stream::{AsChar, Stream},
+    token::{literal, take_till},
+    PResult, Parser,
+};
 
 use crate::utils::{consume_whitespace, parse_ident, StringLiteral};
-
-const ATTRIBUTE_NO_VALUE: &[&str] = &[
-    "bitflags",
-    "deprecated",
-    "flexbuffer",
-    "key",
-    "original_order",
-    "required",
-];
 
 #[derive(Debug, PartialEq)]
 pub enum Attribute<'a> {
@@ -26,7 +23,7 @@ pub enum Attribute<'a> {
     Custom {
         name: &'a str,
         value: Option<&'a str>,
-    }
+    },
 }
 
 impl<'a> Attribute<'a> {
@@ -42,12 +39,22 @@ impl<'a> Attribute<'a> {
             "nested_flatbuffer" => Self::NestedFlatBuffer(""),
             "original_order" => Self::OriginalOrder,
             "required" => Self::Required,
-            custom => Self::Custom { name: custom, value: None }
+            custom => Self::Custom {
+                name: custom,
+                value: None,
+            },
         }
     }
 
     pub fn has_value(&self) -> bool {
-        matches!(self, Self::ForceAlign(_) | Self::Hash(_) | Self::Id(_) | Self::NestedFlatBuffer(_) | Self::Custom { .. })
+        matches!(
+            self,
+            Self::ForceAlign(_)
+                | Self::Hash(_)
+                | Self::Id(_)
+                | Self::NestedFlatBuffer(_)
+                | Self::Custom { .. }
+        )
     }
 
     pub fn has_str_value(&self) -> bool {
@@ -66,7 +73,7 @@ impl<'a> Attribute<'a> {
         match self {
             Self::Hash(val) => *val = value,
             Self::NestedFlatBuffer(val) => *val = value,
-            _ => ()
+            _ => (),
         }
     }
 
@@ -74,19 +81,23 @@ impl<'a> Attribute<'a> {
         match self {
             Self::ForceAlign(val) => *val = value,
             Self::Id(val) => *val = value,
-            _ => ()
+            _ => (),
         }
     }
 
     pub fn insert_value_custom(&mut self, value: &'a str) {
-        match self {
-            Self::Custom { name: _, value: val } => *val = Some(value),
-            _ => ()
+        if let Self::Custom {
+            name: _,
+            value: val,
+        } = self
+        {
+            *val = Some(value)
         }
     }
 }
 
 pub fn parse_attribute<'s>(input: &mut &'s str) -> PResult<Attribute<'s>> {
+    consume_whitespace(input)?;
     // Get the attribute ident
     let ident = parse_ident(input)?;
 
@@ -98,7 +109,10 @@ pub fn parse_attribute<'s>(input: &mut &'s str) -> PResult<Attribute<'s>> {
     let without_value = input.checkpoint();
 
     // If there's a value for the attribute, parse that as well
-    if literal::<_, _, InputError<_>>(":").parse_next(input).is_ok() {
+    if literal::<_, _, InputError<_>>(":")
+        .parse_next(input)
+        .is_ok()
+    {
         if attr.has_value() {
             consume_whitespace(input)?;
 
@@ -107,17 +121,30 @@ pub fn parse_attribute<'s>(input: &mut &'s str) -> PResult<Attribute<'s>> {
 
                 attr.insert_value_str(value);
             } else if attr.has_u64_value() {
-                let value = digit1(input)?
-                    .parse()
-                    .map_err(|_| {
-                        ErrMode::Cut(ContextError::new()
-                            .add_context(input, &without_value, StrContext::Label("attribute value"))
-                            .add_context(input, &without_value, StrContext::Expected(StrContextValue::Description("unsigned integer"))))
-                    })?;
+                let value = digit1(input)?.parse().map_err(|_| {
+                    ErrMode::Cut(
+                        ContextError::new()
+                            .add_context(
+                                input,
+                                &without_value,
+                                StrContext::Label("attribute value"),
+                            )
+                            .add_context(
+                                input,
+                                &without_value,
+                                StrContext::Expected(StrContextValue::Description(
+                                    "unsigned integer",
+                                )),
+                            ),
+                    )
+                })?;
 
                 attr.insert_value_u64(value);
             } else if attr.is_custom() {
-                let value = take_till(1.., |c: char| { c.is_whitespace() || c.is_newline() || c == ',' }).parse_next(input)?;
+                let value = take_till(1.., |c: char| {
+                    c.is_whitespace() || c.is_newline() || c == ','
+                })
+                .parse_next(input)?;
 
                 if !value.is_empty() {
                     attr.insert_value_custom(value);
@@ -126,7 +153,13 @@ pub fn parse_attribute<'s>(input: &mut &'s str) -> PResult<Attribute<'s>> {
         } else {
             let err = ContextError::new()
                 .add_context(input, &without_value, StrContext::Label("attribute"))
-                .add_context(input, &without_value, StrContext::Expected(StrContextValue::Description("no value for this attribute type")));
+                .add_context(
+                    input,
+                    &without_value,
+                    StrContext::Expected(StrContextValue::Description(
+                        "no value for this attribute type",
+                    )),
+                );
             return Err(ErrMode::Cut(err));
         }
     }
@@ -144,20 +177,32 @@ mod tests {
             ("id: 1", Attribute::Id(1)),
             ("id:\n2", Attribute::Id(2)),
             ("deprecated", Attribute::Deprecated),
-            ("custom: hello", Attribute::Custom { name: "custom", value: Some("hello") }),
-            ("custom", Attribute::Custom { name: "custom", value: None }),
+            (
+                "custom: hello",
+                Attribute::Custom {
+                    name: "custom",
+                    value: Some("hello"),
+                },
+            ),
+            (
+                "nested_flatbuffer: \"other_table\"",
+                Attribute::NestedFlatBuffer("other_table"),
+            ),
+            (
+                "custom",
+                Attribute::Custom {
+                    name: "custom",
+                    value: None,
+                },
+            ),
         ];
 
         for (item_str, item) in valid {
             let mut value = item_str;
             assert_eq!(parse_attribute(&mut value), Ok(item));
         }
-    
-        let invalid = [
-            "id:",
-            "nested_flatbuffer: \"not_closed",
-            "custom:",
-        ];
+
+        let invalid = ["id:", "nested_flatbuffer: \"not_closed", "custom:"];
 
         for item in invalid {
             let mut value = item;
