@@ -6,7 +6,7 @@ use winnow::{
     PResult, Parser,
 };
 
-use crate::utils::{consume_whitespace, parse_ident};
+use crate::utils::{consume_whitespace, consume_whitespace_and_comments, parse_ident};
 
 #[derive(Debug, PartialEq)]
 pub struct Array<'a> {
@@ -34,11 +34,11 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Array<'s>, E> {
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Try to consume an opening square bracket
         literal("[").parse_next(input)?;
         // Clear out any whitespace
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
 
         // Parse the item type
         let item_type = parse_ident(input).map(|ident| {
@@ -49,11 +49,11 @@ where
             }
         })?;
 
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
 
         // Consume the delimiter
         literal(":").parse_next(input)?;
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
 
         let length_start = input.checkpoint();
         let length = digit1(input)?.parse().map_err(|_| {
@@ -68,7 +68,7 @@ where
             )
         })?;
 
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Try to consume a closing square bracket
         literal("]")
             .context(StrContext::Label("array"))
@@ -89,7 +89,7 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<StructFieldType<'s>, E> {
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Parse as vector
         let val = if input.starts_with('[') {
             let array = ParseArray.parse_next(input)?;
@@ -117,15 +117,15 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice, E> {
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Try to consume an opening square bracket
         literal("[").parse_next(input)?;
         // Clear out any whitespace
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Parse the inner type
         let value = parse_ident(input)?;
 
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Try to consume a closing square bracket
         literal("]")
             .context(StrContext::Label("vector"))
@@ -146,7 +146,7 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<TypeIdent<'s>, E> {
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Parse as vector
         let val = if input.starts_with('[') {
             let ident = VectorWrapped.parse_next(input)?;
@@ -182,7 +182,7 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<ScalarType, E> {
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         let checkpoint = input.checkpoint();
 
         // Parse the ident from the type

@@ -7,7 +7,7 @@ use winnow::{
     PResult, Parser,
 };
 
-use crate::utils::{consume_whitespace, parse_ident, IdentParser};
+use crate::utils::{consume_whitespace, consume_whitespace_and_comments, parse_ident, IdentParser};
 
 use super::primitives::{ParseStructFieldType, StructFieldType};
 
@@ -15,12 +15,14 @@ use super::primitives::{ParseStructFieldType, StructFieldType};
 pub struct StructField<'a> {
     name: &'a str,
     field_type: StructFieldType<'a>,
+    comments: Vec<&'a str>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Struct<'a> {
     name: &'a str,
     fields: Vec<StructField<'a>>,
+    comments: Vec<&'a str>,
 }
 
 struct StructFieldParser;
@@ -31,23 +33,24 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<StructField<'s>, E> {
-        consume_whitespace(input)?;
+        let comments = consume_whitespace_and_comments(input)?;
         // Get the field ident
         let ident = parse_ident(input)?;
 
         literal(":").parse_next(input)?;
 
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Consume the opening bracket
         let field_type = ParseStructFieldType.parse_next(input)?;
 
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
 
         literal(";").parse_next(input)?;
 
         Ok(StructField {
             name: ident,
             field_type,
+            comments,
         })
     }
 }
@@ -60,31 +63,34 @@ where
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Struct<'s>, E> {
-        consume_whitespace(input)?;
+        let comments = consume_whitespace_and_comments(input)?;
         // Parse the keyword
         literal("struct").parse_next(input)?;
 
         // Get the struct ident
         let ident = parse_ident(input)?;
 
-        consume_whitespace(input)?;
+        consume_whitespace_and_comments(input)?;
         // Consume the opening bracket
         literal("{").parse_next(input)?;
 
+        // Consume whitespace instead of comments here so the any comments get
+        // added to the field
         consume_whitespace(input)?;
 
         let mut fields = Vec::new();
 
         // While we aren't at the end of the struct
-        while !input.starts_with("}") {
+        while !input.starts_with('}') {
             let field = StructFieldParser.parse_next(input)?;
             fields.push(field);
-            consume_whitespace(input)?;
+            consume_whitespace_and_comments(input)?;
         }
 
         Ok(Struct {
             name: ident,
             fields,
+            comments,
         })
     }
 }
@@ -108,18 +114,25 @@ mod tests {
             fields: vec![StructField {
                 name: "foo",
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
+                comments: Vec::new(),
             }],
+            comments: Vec::new(),
         };
 
         let struct2_str = r#"
+            // This is NOT documentation
+            /// This is a comment!
             struct Hello_There {
+                /// This is field documentation
                 foo:[int32:50];
                 bar:
+                    /// This is a random comment that shouldn't be loaded
                     float  ;
                 another: [
                     Struct2:
                     5
                 ];
+                /// This should be ignored
             }
         "#;
 
@@ -132,10 +145,12 @@ mod tests {
                         item_type: ArrayItemType::Scalar(ScalarType::Int32),
                         length: 50,
                     }),
+                    comments: vec!["This is field documentation"],
                 },
                 StructField {
                     name: "bar",
                     field_type: StructFieldType::Scalar(ScalarType::Float32),
+                    comments: Vec::new(),
                 },
                 StructField {
                     name: "another",
@@ -143,8 +158,10 @@ mod tests {
                         item_type: ArrayItemType::Named("Struct2"),
                         length: 5,
                     }),
+                    comments: Vec::new(),
                 },
             ],
+            comments: vec!["This is a comment!"],
         };
 
         let valid = [(struct1_str, struct1), (struct2_str, struct2)];

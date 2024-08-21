@@ -1,9 +1,5 @@
 use winnow::{
-    combinator::delimited,
-    error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
-    stream::{AsChar, Compare, Stream, StreamIsPartial},
-    token::{literal, one_of, take_till, take_while},
-    PResult, Parser,
+    ascii::till_line_ending, combinator::{delimited, eof, not, repeat}, error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue}, stream::{AsChar, Compare, Stream, StreamIsPartial}, token::{literal, one_of, take_till, take_while}, PResult, Parser
 };
 
 pub struct IdentParser;
@@ -34,9 +30,53 @@ pub fn parse_ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
     IdentParser.parse_next(input)
 }
 
-/// Consumes both whitespace and newlines
+struct CommentParser;
+
+impl<'s, E> Parser<&'s str, Option<&'s str>, E> for CommentParser
+where
+    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
+    ErrMode<E>: From<ErrMode<ContextError>>,
+{
+    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Option<&'s str>, E> {
+        consume_whitespace(input)?;
+        // Consume the comment start
+        literal("//").parse_next(input)?;
+
+        // If we still have another / left, this is documentation, and should be kept
+        let is_doc = input.starts_with('/');
+        
+        // Remove the leading slash when it's a documentation comment
+        if is_doc {
+            literal("/").parse_next(input)?;
+        }
+
+        // Consume whitespace until comment
+        take_while(0.., (AsChar::is_newline, AsChar::is_space)).parse_next(input)?;
+        
+        let comment = till_line_ending(input)?;
+
+        // Only return the comment if it was documentation
+        if is_doc {
+            Ok(Some(comment))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// Consumes whitespace only
 pub fn consume_whitespace<'s>(input: &mut &'s str) -> PResult<&'s str> {
     take_while(0.., (AsChar::is_newline, AsChar::is_space)).parse_next(input)
+}
+
+/// Consumes both whitespace/newlines and comments, returning any comments found along the way
+pub fn consume_whitespace_and_comments<'s>(input: &mut &'s str) -> PResult<Vec<&'s str>> {
+    consume_whitespace(input)?;
+    let comments: Vec<Option<&'s str>> = repeat(0.., CommentParser).parse_next(input)?;
+    consume_whitespace(input)?;
+    let comments: Vec<&'s str> = comments.into_iter().flatten().collect();
+    
+    Ok(comments)
 }
 
 pub struct StringLiteral;
@@ -83,6 +123,21 @@ mod tests {
         for item in invalid {
             let mut value = item;
             assert!(parse_ident(&mut value).is_err());
+        }
+    }
+
+    #[test]
+    fn comments() {
+        let valid = [
+            (" /// this is a comment", vec!["this is a comment"]),
+            ("\n/// Comment here\n/// Another line!", vec!["Comment here", "Another line!"]),
+            ("/// This is a comment\nthis is not!", vec!["This is a comment"]),
+            ("This is not a comment", Vec::new()),
+        ];
+
+        for (item_str, item) in valid {
+            let mut value = item_str;
+            assert_eq!(consume_whitespace_and_comments(&mut value), Ok(item));
         }
     }
 }
