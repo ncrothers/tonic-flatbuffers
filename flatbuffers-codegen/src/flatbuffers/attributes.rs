@@ -1,5 +1,12 @@
 use winnow::{
-    ascii::digit1, combinator::separated, error::{AddContext, ContextError, ErrMode, InputError, ParserError, StrContext, StrContextValue}, stream::{AsChar, Stream}, token::{literal, take_till}, PResult, Parser
+    ascii::digit1,
+    combinator::separated,
+    error::{
+        AddContext, ContextError, ErrMode, InputError, ParserError, StrContext, StrContextValue,
+    },
+    stream::{AsChar, Stream},
+    token::{literal, take_till},
+    PResult, Parser,
 };
 
 use crate::utils::{consume_whitespace_and_comments, parse_ident, StringLiteral};
@@ -103,14 +110,14 @@ where
         consume_whitespace_and_comments(input)?;
         // Get the attribute ident
         let ident = parse_ident(input)?;
-    
+
         // Consume any whitespace and/or newlines
         consume_whitespace_and_comments(input)?;
-    
+
         let mut attr = Attribute::from_ident(ident);
-    
+
         let without_value = input.checkpoint();
-    
+
         // If there's a value for the attribute, parse that as well
         if literal::<_, _, InputError<_>>(":")
             .parse_next(input)
@@ -118,14 +125,14 @@ where
         {
             if attr.has_value() {
                 consume_whitespace_and_comments(input)?;
-    
+
                 if attr.has_str_value() {
                     let value = StringLiteral.parse_next(input)?;
-    
+
                     attr.insert_value_str(value);
                 } else if attr.has_u64_value() {
                     let value = digit1(input)?.parse().map_err(|_| {
-                        ErrMode::Cut(
+                        ErrMode::Backtrack(
                             ContextError::new()
                                 .add_context(
                                     input,
@@ -141,14 +148,14 @@ where
                                 ),
                         )
                     })?;
-    
+
                     attr.insert_value_u64(value);
                 } else if attr.is_custom() {
                     let value = take_till(1.., |c: char| {
                         c.is_whitespace() || c.is_newline() || c == ','
                     })
                     .parse_next(input)?;
-    
+
                     if !value.is_empty() {
                         attr.insert_value_custom(value);
                     }
@@ -166,7 +173,7 @@ where
                 return Err(ErrMode::Backtrack(err).into());
             }
         }
-    
+
         Ok(attr)
     }
 }
@@ -185,13 +192,13 @@ where
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Vec<Attribute<'s>>, E> {
         consume_whitespace_and_comments(input)?;
         literal("(").parse_next(input)?;
-    
+
         let attrs = separated(1.., AttributeParser, ",").parse_next(input)?;
 
         consume_whitespace_and_comments(input)?;
 
         literal(")").parse_next(input)?;
-    
+
         Ok(attrs)
     }
 }
@@ -249,7 +256,10 @@ mod tests {
         let valid = [
             ("(id: 1)", vec![Attribute::Id(1)]),
             ("(id:\n2)", vec![Attribute::Id(2)]),
-            ("(deprecated, /// ignore me\n id: 1)", vec![Attribute::Deprecated, Attribute::Id(1)]),
+            (
+                "(deprecated, /// ignore me\n id: 1)",
+                vec![Attribute::Deprecated, Attribute::Id(1)],
+            ),
         ];
 
         for (item_str, item) in valid {

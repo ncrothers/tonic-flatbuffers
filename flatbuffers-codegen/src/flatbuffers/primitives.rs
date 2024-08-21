@@ -21,9 +21,11 @@ pub enum ArrayItemType<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum TypeIdent<'a> {
-    BuiltIn(BuiltInTable<'a>),
+pub enum TableFieldType<'a> {
+    Scalar(ScalarType),
+    String,
     Named(&'a str),
+    Vector(VectorItemType<'a>),
 }
 
 pub struct ParseArray;
@@ -57,7 +59,7 @@ where
 
         let length_start = input.checkpoint();
         let length = digit1(input)?.parse().map_err(|_| {
-            ErrMode::Cut(
+            ErrMode::Backtrack(
                 ContextError::new()
                     .add_context(input, &length_start, StrContext::Label("array length"))
                     .add_context(
@@ -140,33 +142,33 @@ where
 
 pub struct ParseTypeIdent;
 
-impl<'s, E> Parser<&'s str, TypeIdent<'s>, E> for ParseTypeIdent
+impl<'s, E> Parser<&'s str, TableFieldType<'s>, E> for ParseTypeIdent
 where
     E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
     ErrMode<E>: From<ErrMode<ContextError>>,
 {
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<TypeIdent<'s>, E> {
+    fn parse_next(&mut self, input: &mut &'s str) -> PResult<TableFieldType<'s>, E> {
         consume_whitespace_and_comments(input)?;
         // Parse as vector
         let val = if input.starts_with('[') {
             let ident = VectorWrapped.parse_next(input)?;
 
             if ident == "string" {
-                TypeIdent::BuiltIn(BuiltInTable::Vector(VectorItemType::String))
+                TableFieldType::Vector(VectorItemType::String)
             } else if let Some(scalar) = ScalarType::parse(ident) {
-                TypeIdent::BuiltIn(BuiltInTable::Vector(VectorItemType::Scalar(scalar)))
+                TableFieldType::Vector(VectorItemType::Scalar(scalar))
             } else {
-                TypeIdent::BuiltIn(BuiltInTable::Vector(VectorItemType::Named(ident)))
+                TableFieldType::Vector(VectorItemType::Named(ident))
             }
         } else {
             let ident = parse_ident(input)?;
 
             if ident == "string" {
-                TypeIdent::BuiltIn(BuiltInTable::String)
+                TableFieldType::String
             } else if let Some(scalar) = ScalarType::parse(ident) {
-                TypeIdent::BuiltIn(BuiltInTable::Scalar(scalar))
+                TableFieldType::Scalar(scalar)
             } else {
-                TypeIdent::Named(ident)
+                TableFieldType::Named(ident)
             }
         };
 
@@ -269,6 +271,20 @@ impl ScalarType {
             _ => None,
         }
     }
+
+    pub fn is_integer(&self) -> bool {
+        matches!(
+            self,
+            Self::Int8
+                | Self::UInt8
+                | Self::Int16
+                | Self::UInt16
+                | Self::Int32
+                | Self::UInt32
+                | Self::Int64
+                | Self::UInt64
+        )
+    }
 }
 
 pub enum NonScalar {
@@ -328,32 +344,23 @@ mod tests {
         let valid = [
             (
                 "[uint32]",
-                TypeIdent::BuiltIn(BuiltInTable::Vector(VectorItemType::Scalar(
-                    ScalarType::UInt32,
-                ))),
+                TableFieldType::Vector(VectorItemType::Scalar(ScalarType::UInt32)),
             ),
             (
                 "[bool ]",
-                TypeIdent::BuiltIn(BuiltInTable::Vector(VectorItemType::Scalar(
-                    ScalarType::Bool,
-                ))),
+                TableFieldType::Vector(VectorItemType::Scalar(ScalarType::Bool)),
             ),
             (
                 "[ hello]",
-                TypeIdent::BuiltIn(BuiltInTable::Vector(VectorItemType::Named("hello"))),
+                TableFieldType::Vector(VectorItemType::Named("hello")),
             ),
             (
                 "[double ]",
-                TypeIdent::BuiltIn(BuiltInTable::Vector(VectorItemType::Scalar(
-                    ScalarType::Float64,
-                ))),
+                TableFieldType::Vector(VectorItemType::Scalar(ScalarType::Float64)),
             ),
-            (
-                "double",
-                TypeIdent::BuiltIn(BuiltInTable::Scalar(ScalarType::Float64)),
-            ),
-            ("string", TypeIdent::BuiltIn(BuiltInTable::String)),
-            ("hello", TypeIdent::Named("hello")),
+            ("double", TableFieldType::Scalar(ScalarType::Float64)),
+            ("string", TableFieldType::String),
+            ("hello", TableFieldType::Named("hello")),
         ];
 
         for (item_str, item) in valid {

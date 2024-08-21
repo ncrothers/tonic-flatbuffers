@@ -1,6 +1,48 @@
 use winnow::{
-    ascii::till_line_ending, combinator::{delimited, eof, not, repeat}, error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue}, stream::{AsChar, Compare, Stream, StreamIsPartial}, token::{literal, one_of, take_till, take_while}, PResult, Parser
+    ascii::till_line_ending,
+    combinator::{delimited, eof, not, repeat},
+    error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
+    stream::{AsChar, Compare, Stream, StreamIsPartial},
+    token::{literal, one_of, take_till, take_while},
+    PResult, Parser,
 };
+
+macro_rules! impl_typename {
+    ($($type:ty),*) => {
+        $(
+            paste::paste! {
+                impl TypeName for $type {
+                    fn type_name() -> &'static str {
+                        stringify!($type)
+                    }
+                }
+            }
+        )*
+    };
+}
+
+pub trait TypeName {
+    fn type_name() -> &'static str;
+}
+
+impl_typename!(i8, u8, i16, u16, i32, u32, i64, u64, f32, f64);
+
+/// Returns non-whitespace tokens prefixed by whitespace. Unlike `consume_whitespace`,
+/// whitespace is purely considered to be spaces or tabs, not line endings.
+pub struct WhitespacePrefixedParser;
+
+impl<'s, E> Parser<&'s str, <&'s str as Stream>::Slice, E> for WhitespacePrefixedParser
+where
+    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
+    ErrMode<E>: From<ErrMode<ContextError>>,
+{
+    fn parse_next(&mut self, input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice, E> {
+        // Remove whitespace at the front
+        take_while(0.., |c| AsChar::is_space(c)).parse_next(input)?;
+
+        take_while(1.., |c| !AsChar::is_space(c)).parse_next(input)
+    }
+}
 
 pub struct IdentParser;
 
@@ -44,7 +86,7 @@ where
 
         // If we still have another / left, this is documentation, and should be kept
         let is_doc = input.starts_with('/');
-        
+
         // Remove the leading slash when it's a documentation comment
         if is_doc {
             literal("/").parse_next(input)?;
@@ -52,7 +94,7 @@ where
 
         // Consume whitespace until comment
         take_while(0.., (AsChar::is_newline, AsChar::is_space)).parse_next(input)?;
-        
+
         let comment = till_line_ending(input)?;
 
         // Only return the comment if it was documentation
@@ -64,7 +106,7 @@ where
     }
 }
 
-/// Consumes whitespace only
+/// Consumes whitespace only, including line endings
 pub fn consume_whitespace<'s>(input: &mut &'s str) -> PResult<&'s str> {
     take_while(0.., (AsChar::is_newline, AsChar::is_space)).parse_next(input)
 }
@@ -75,7 +117,7 @@ pub fn consume_whitespace_and_comments<'s>(input: &mut &'s str) -> PResult<Vec<&
     let comments: Vec<Option<&'s str>> = repeat(0.., CommentParser).parse_next(input)?;
     consume_whitespace(input)?;
     let comments: Vec<&'s str> = comments.into_iter().flatten().collect();
-    
+
     Ok(comments)
 }
 
@@ -130,8 +172,14 @@ mod tests {
     fn comments() {
         let valid = [
             (" /// this is a comment", vec!["this is a comment"]),
-            ("\n/// Comment here\n/// Another line!", vec!["Comment here", "Another line!"]),
-            ("/// This is a comment\nthis is not!", vec!["This is a comment"]),
+            (
+                "\n/// Comment here\n/// Another line!",
+                vec!["Comment here", "Another line!"],
+            ),
+            (
+                "/// This is a comment\nthis is not!",
+                vec!["This is a comment"],
+            ),
             ("This is not a comment", Vec::new()),
         ];
 
@@ -139,5 +187,12 @@ mod tests {
             let mut value = item_str;
             assert_eq!(consume_whitespace_and_comments(&mut value), Ok(item));
         }
+    }
+
+    #[test]
+    fn type_name() {
+        assert_eq!(u32::type_name(), "u32");
+        assert_eq!(f64::type_name(), "f64");
+        assert_eq!(i8::type_name(), "i8");
     }
 }
