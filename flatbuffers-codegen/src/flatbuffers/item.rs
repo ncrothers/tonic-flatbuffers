@@ -1,6 +1,5 @@
 use winnow::{
     combinator::{alt, delimited, trace},
-    error::{AddContext, ContextError, ErrMode, ParserError, StrContext},
     token::{literal, take_while},
     PResult, Parser,
 };
@@ -32,14 +31,8 @@ pub enum Item<'a> {
     Union(Union<'a>),
 }
 
-pub struct ItemParser;
-
-impl<'s, E> Parser<&'s str, Item<'s>, E> for ItemParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Item<'s>, E> {
+pub fn item<'s>(input: &mut &'s str) -> PResult<Item<'s>> {
+    trace("item", |input: &mut _| {
         let item = alt((
             attribute_decl.map(Item::Attribute),
             enum_item.map(Item::Enum),
@@ -59,7 +52,8 @@ where
         whitespace_all(input)?;
 
         Ok(item)
-    }
+    })
+    .parse_next(input)
 }
 
 fn attribute_decl<'s>(input: &mut &'s str) -> PResult<&'s str> {
@@ -180,46 +174,31 @@ mod tests {
     #[test]
     fn r#struct() {
         assert_eq!(
-            ItemParser.parse("attribute \"testing\";"),
+            item.parse("attribute \"testing\";"),
             Ok(Item::Attribute("testing"))
         );
-        assert!(matches!(
-            ItemParser.parse("enum test:int {}"),
-            Ok(Item::Enum(_))
-        ));
+        assert!(matches!(item.parse("enum test:int {}"), Ok(Item::Enum(_))));
         assert_eq!(
-            ItemParser.parse("file_identifier \"TEST\";"),
+            item.parse("file_identifier \"TEST\";"),
             Ok(Item::FileIdentifier("TEST"))
         );
-        assert!(ItemParser.parse("file_identifier \"TESTa\";").is_err());
-        assert!(ItemParser.parse("file_identifier \"TES\";").is_err());
+        assert!(item.parse("file_identifier \"TESTa\";").is_err());
+        assert!(item.parse("file_identifier \"TES\";").is_err());
         assert_eq!(
-            ItemParser.parse("file_extension \"ext\";"),
+            item.parse("file_extension \"ext\";"),
             Ok(Item::FileExtension("ext"))
         );
         assert_eq!(
-            ItemParser.parse("include \"file.fbs\";"),
+            item.parse("include \"file.fbs\";"),
             Ok(Item::Include("file.fbs"))
         );
         assert_eq!(
-            ItemParser.parse("namespace one.two.three;"),
+            item.parse("namespace one.two.three;"),
             Ok(Item::Namespace("one.two.three"))
         );
-        assert_eq!(
-            ItemParser.parse("root_type Table;"),
-            Ok(Item::RootType("Table"))
-        );
-        assert!(matches!(
-            ItemParser.parse("struct test {}"),
-            Ok(Item::Struct(_))
-        ));
-        assert!(matches!(
-            ItemParser.parse("table test {}"),
-            Ok(Item::Table(_))
-        ));
-        assert!(matches!(
-            ItemParser.parse("union test {}"),
-            Ok(Item::Union(_))
-        ));
+        assert_eq!(item.parse("root_type Table;"), Ok(Item::RootType("Table")));
+        assert!(matches!(item.parse("struct test {}"), Ok(Item::Struct(_))));
+        assert!(matches!(item.parse("table test {}"), Ok(Item::Table(_))));
+        assert!(matches!(item.parse("union test {}"), Ok(Item::Union(_))));
     }
 }
