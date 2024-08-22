@@ -1,13 +1,13 @@
 use winnow::{
     ascii::digit1,
     combinator::trace,
-    error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
+    error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::Stream,
     token::literal,
     PResult, Parser,
 };
 
-use crate::utils::{consume_whitespace, consume_whitespace_and_comments, parse_ident};
+use crate::utils::{ident, namespaced_ident, whitespace_and_comments_opt};
 
 #[derive(Debug, PartialEq)]
 pub struct Array<'a> {
@@ -27,176 +27,6 @@ pub enum TableFieldType<'a> {
     String,
     Named(&'a str),
     Vector(VectorItemType<'a>),
-}
-
-pub struct ParseArray;
-
-impl<'s, E> Parser<&'s str, Array<'s>, E> for ParseArray
-where
-    E: AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Array<'s>, E> {
-        consume_whitespace_and_comments(input)?;
-        // Try to consume an opening square bracket
-        literal("[").parse_next(input)?;
-        // Clear out any whitespace
-        consume_whitespace_and_comments(input)?;
-
-        // Parse the item type
-        let item_type = parse_ident(input).map(|ident| {
-            if let Some(scalar) = ScalarType::parse(ident) {
-                ArrayItemType::Scalar(scalar)
-            } else {
-                ArrayItemType::Named(ident)
-            }
-        })?;
-
-        consume_whitespace_and_comments(input)?;
-
-        // Consume the delimiter
-        literal(":").parse_next(input)?;
-        consume_whitespace_and_comments(input)?;
-
-        // let length_start = input.checkpoint();
-        let length = Parser::parse_to(digit1).parse_next(input)?;
-
-        consume_whitespace_and_comments(input)?;
-        // Try to consume a closing square bracket
-        literal("]")
-            .context(StrContext::Label("array"))
-            .context(StrContext::Expected(StrContextValue::Description(
-                "closing bracket",
-            )))
-            .parse_next(input)?;
-
-        Ok(Array { item_type, length })
-    }
-}
-
-pub struct ParseStructFieldType;
-
-impl<'s, E> Parser<&'s str, StructFieldType<'s>, E> for ParseStructFieldType
-where
-    E: AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<StructFieldType<'s>, E> {
-        consume_whitespace_and_comments(input)?;
-        // Parse as vector
-        let val = if input.starts_with('[') {
-            let array = ParseArray.parse_next(input)?;
-
-            StructFieldType::Array(array)
-        } else {
-            let ident = parse_ident(input)?;
-
-            if let Some(scalar) = ScalarType::parse(ident) {
-                StructFieldType::Scalar(scalar)
-            } else {
-                StructFieldType::Struct(ident)
-            }
-        };
-
-        Ok(val)
-    }
-}
-
-pub struct VectorWrapped;
-
-impl<'s, E> Parser<&'s str, <&'s str as Stream>::Slice, E> for VectorWrapped
-where
-    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice, E> {
-        consume_whitespace_and_comments(input)?;
-        // Try to consume an opening square bracket
-        literal("[").parse_next(input)?;
-        // Clear out any whitespace
-        consume_whitespace_and_comments(input)?;
-        // Parse the inner type
-        let value = parse_ident(input)?;
-
-        consume_whitespace_and_comments(input)?;
-        // Try to consume a closing square bracket
-        literal("]")
-            .context(StrContext::Label("vector"))
-            .context(StrContext::Expected(StrContextValue::Description(
-                "closing bracket",
-            )))
-            .parse_next(input)?;
-
-        Ok(value)
-    }
-}
-
-pub struct ParseTypeIdent;
-
-impl<'s, E> Parser<&'s str, TableFieldType<'s>, E> for ParseTypeIdent
-where
-    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<TableFieldType<'s>, E> {
-        trace("parse_type_ident", |i: &mut _| {
-            consume_whitespace_and_comments(i)?;
-            // Parse as vector
-            let val = if i.starts_with('[') {
-                let ident = VectorWrapped.parse_next(i)?;
-
-                if ident == "string" {
-                    TableFieldType::Vector(VectorItemType::String)
-                } else if let Some(scalar) = ScalarType::parse(ident) {
-                    TableFieldType::Vector(VectorItemType::Scalar(scalar))
-                } else {
-                    TableFieldType::Vector(VectorItemType::Named(ident))
-                }
-            } else {
-                let ident = parse_ident(i)?;
-
-                if ident == "string" {
-                    TableFieldType::String
-                } else if let Some(scalar) = ScalarType::parse(ident) {
-                    TableFieldType::Scalar(scalar)
-                } else {
-                    TableFieldType::Named(ident)
-                }
-            };
-
-            Ok(val)
-        })
-        .parse_next(input)
-    }
-}
-
-pub struct ParseScalarType;
-
-impl<'s, E> Parser<&'s str, ScalarType, E> for ParseScalarType
-where
-    E: AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<ScalarType, E> {
-        consume_whitespace_and_comments(input)?;
-        let checkpoint = input.checkpoint();
-
-        // Parse the ident from the type
-        let ident = parse_ident(input)?;
-
-        ScalarType::parse(ident).ok_or_else(|| {
-            let err = ContextError::new()
-                .add_context(input, &checkpoint, StrContext::Label("scalar"))
-                .add_context(
-                    input,
-                    &checkpoint,
-                    StrContext::Expected(StrContextValue::Description(
-                        "flatbuffer-defined scalar type",
-                    )),
-                );
-            ErrMode::Backtrack(err).into()
-        })
-    }
 }
 
 /// Type that a struct field can have, which is limited to other structs and
@@ -281,8 +111,146 @@ impl ScalarType {
     }
 }
 
-pub enum NonScalar {
-    Vector,
+pub fn array_type<'s>(input: &mut &'s str) -> PResult<Array<'s>> {
+    trace("array_type", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
+        // Try to consume an opening square bracket
+        literal("[").parse_next(input)?;
+        // Clear out any whitespace
+        whitespace_and_comments_opt(input)?;
+
+        // Parse the item type
+        let item_type = namespaced_ident.parse_next(input).map(|ident| {
+            if let Some(scalar) = ScalarType::parse(ident) {
+                ArrayItemType::Scalar(scalar)
+            } else {
+                ArrayItemType::Named(ident)
+            }
+        })?;
+
+        whitespace_and_comments_opt(input)?;
+
+        // Consume the delimiter
+        literal(":").parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
+
+        // let length_start = input.checkpoint();
+        let length = Parser::parse_to(digit1).parse_next(input)?;
+
+        whitespace_and_comments_opt(input)?;
+        // Try to consume a closing square bracket
+        literal("]")
+            .context(StrContext::Label("array"))
+            .context(StrContext::Expected(StrContextValue::Description(
+                "closing bracket",
+            )))
+            .parse_next(input)?;
+
+        Ok(Array { item_type, length })
+    })
+    .parse_next(input)
+}
+
+pub fn struct_field_type<'s>(input: &mut &'s str) -> PResult<StructFieldType<'s>> {
+    trace("struct_field_type", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
+        // Parse as vector
+        let val = if input.starts_with('[') {
+            let array = array_type.parse_next(input)?;
+
+            StructFieldType::Array(array)
+        } else {
+            let ident = namespaced_ident.parse_next(input)?;
+
+            if let Some(scalar) = ScalarType::parse(ident) {
+                StructFieldType::Scalar(scalar)
+            } else {
+                StructFieldType::Struct(ident)
+            }
+        };
+
+        Ok(val)
+    })
+    .parse_next(input)
+}
+
+pub fn vector_type<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice> {
+    trace("vector_type", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
+        // Try to consume an opening square bracket
+        literal("[").parse_next(input)?;
+        // Clear out any whitespace
+        whitespace_and_comments_opt(input)?;
+        // Parse the inner type
+        let value = namespaced_ident.parse_next(input)?;
+
+        whitespace_and_comments_opt(input)?;
+        // Try to consume a closing square bracket
+        literal("]")
+            .context(StrContext::Label("vector"))
+            .context(StrContext::Expected(StrContextValue::Description(
+                "closing bracket",
+            )))
+            .parse_next(input)?;
+
+        Ok(value)
+    })
+    .parse_next(input)
+}
+
+pub fn table_field_type<'s>(input: &mut &'s str) -> PResult<TableFieldType<'s>> {
+    trace("table_field_type", |i: &mut _| {
+        whitespace_and_comments_opt(i)?;
+        // Parse as vector
+        let val = if i.starts_with('[') {
+            let ident = vector_type.parse_next(i)?;
+
+            if ident == "string" {
+                TableFieldType::Vector(VectorItemType::String)
+            } else if let Some(scalar) = ScalarType::parse(ident) {
+                TableFieldType::Vector(VectorItemType::Scalar(scalar))
+            } else {
+                TableFieldType::Vector(VectorItemType::Named(ident))
+            }
+        } else {
+            let ident = namespaced_ident.parse_next(i)?;
+
+            if ident == "string" {
+                TableFieldType::String
+            } else if let Some(scalar) = ScalarType::parse(ident) {
+                TableFieldType::Scalar(scalar)
+            } else {
+                TableFieldType::Named(ident)
+            }
+        };
+
+        Ok(val)
+    })
+    .parse_next(input)
+}
+
+pub fn scalar_type(input: &mut &str) -> PResult<ScalarType> {
+    trace("scalar_type", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
+        let checkpoint = input.checkpoint();
+
+        // Parse the ident from the type
+        let ident = ident.parse_next(input)?;
+
+        ScalarType::parse(ident).ok_or_else(|| {
+            let err = ContextError::new()
+                .add_context(input, &checkpoint, StrContext::Label("scalar"))
+                .add_context(
+                    input,
+                    &checkpoint,
+                    StrContext::Expected(StrContextValue::Description(
+                        "flatbuffer-defined scalar type",
+                    )),
+                );
+            ErrMode::Backtrack(err)
+        })
+    })
+    .parse_next(input)
 }
 
 #[cfg(test)]
@@ -300,14 +268,14 @@ mod tests {
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(ParseScalarType.parse_next(&mut value), Ok(item));
+            assert_eq!(scalar_type.parse_next(&mut value), Ok(item));
         }
 
         let invalid = ["i32", "_uint32", "_float"];
 
         for item in invalid {
             let mut value = item;
-            assert!(ParseScalarType.parse_next(&mut value).is_err());
+            assert!(scalar_type.parse_next(&mut value).is_err());
         }
     }
 
@@ -322,19 +290,19 @@ mod tests {
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(VectorWrapped.parse_next(&mut value), Ok(item));
+            assert_eq!(vector_type.parse_next(&mut value), Ok(item));
         }
 
         let invalid = ["uint32", "[uint32", "uint32]", "[uint32 asd]", "a  c"];
 
         for item in invalid {
             let mut value = item;
-            assert!(VectorWrapped.parse_next(&mut value).is_err());
+            assert!(vector_type.parse_next(&mut value).is_err());
         }
     }
 
     #[test]
-    fn type_ident() {
+    fn table_field_type_() {
         let valid = [
             (
                 "[uint32]",
@@ -359,14 +327,14 @@ mod tests {
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(ParseTypeIdent.parse_next(&mut value), Ok(item));
+            assert_eq!(table_field_type.parse_next(&mut value), Ok(item));
         }
 
         let invalid = ["[uint32", "[uint32 asd]"];
 
         for item in invalid {
             let mut value = item;
-            assert!(ParseTypeIdent.parse_next(&mut value).is_err());
+            assert!(table_field_type.parse_next(&mut value).is_err());
         }
     }
 
@@ -398,19 +366,19 @@ mod tests {
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(ParseArray.parse_next(&mut value), Ok(item));
+            assert_eq!(array_type.parse_next(&mut value), Ok(item));
         }
 
         let invalid = ["[uint32]", "[uint32:5", "[hello 5]", "uint32:5]"];
 
         for item in invalid {
             let mut value = item;
-            assert!(ParseArray.parse_next(&mut value).is_err());
+            assert!(array_type.parse_next(&mut value).is_err());
         }
     }
 
     #[test]
-    fn struct_field_type() {
+    fn struct_field_type_() {
         let valid = [
             (
                 "[uint32\n: \n 5]",
@@ -425,14 +393,14 @@ mod tests {
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(ParseStructFieldType.parse_next(&mut value), Ok(item));
+            assert_eq!(struct_field_type.parse_next(&mut value), Ok(item));
         }
 
         let invalid = ["[uint32]", "[uint32:5"];
 
         for item in invalid {
             let mut value = item;
-            assert!(ParseArray.parse_next(&mut value).is_err());
+            assert!(struct_field_type.parse_next(&mut value).is_err());
         }
     }
 }

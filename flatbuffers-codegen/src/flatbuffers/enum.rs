@@ -3,20 +3,20 @@ use std::str::FromStr;
 use winnow::{
     ascii::digit1,
     combinator::{opt, separated, trace},
-    error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
+    error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::Stream,
     token::literal,
     PResult, Parser,
 };
 
 use crate::{
-    flatbuffers::attributes::AttributeSectionParser,
-    utils::{consume_whitespace_and_comments, parse_ident, IdentParser, TypeName},
+    flatbuffers::primitives::scalar_type,
+    utils::{ident, whitespace_and_comments_opt, TypeName},
 };
 
 use super::{
-    attributes::Attribute,
-    primitives::{ParseScalarType, ScalarType},
+    attributes::{attribute_list, Attribute},
+    primitives::ScalarType,
 };
 
 #[derive(Debug, PartialEq)]
@@ -55,137 +55,122 @@ pub struct Enum<'a> {
     attributes: Vec<Attribute<'a>>,
 }
 
-struct EnumVariantParser;
-
-impl<'s, E, T> Parser<&'s str, EnumVariant<'s, T>, E> for EnumVariantParser
+fn enum_variant<'s, T>(input: &mut &'s str) -> PResult<EnumVariant<'s, T>>
 where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
     T: FromStr + TypeName,
 {
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<EnumVariant<'s, T>, E> {
-        let comments = consume_whitespace_and_comments(input)?;
+    let comments = whitespace_and_comments_opt(input)?;
 
-        let ident = IdentParser
-            .context(StrContext::Expected(StrContextValue::Description(
-                "enum identifier",
-            )))
+    let ident = ident
+        .context(StrContext::Expected(StrContextValue::Description(
+            "enum identifier",
+        )))
+        .parse_next(input)?;
+
+    whitespace_and_comments_opt(input)?;
+
+    // Parse the index value
+    let idx = if input.starts_with('=') {
+        literal("=").parse_next(input)?;
+
+        whitespace_and_comments_opt(input)?;
+
+        let idx = Parser::parse_to(digit1).parse_next(input)?;
+
+        Some(idx)
+    } else {
+        None
+    };
+
+    let attrs = opt(attribute_list).parse_next(input)?;
+
+    whitespace_and_comments_opt(input)?;
+
+    Ok(EnumVariant {
+        name: ident,
+        idx,
+        comments,
+        attributes: attrs.unwrap_or_default(),
+    })
+}
+
+pub fn enum_item<'s>(input: &mut &'s str) -> PResult<Enum<'s>> {
+    trace("enum", |input: &mut _| {
+        let comments = whitespace_and_comments_opt(input)?;
+
+        literal("enum").parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
+
+        let ident = ident.parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
+
+        literal(":")
+            .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
+            .parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
+
+        let before_scalar = input.checkpoint();
+
+        let scalar = scalar_type.parse_next(input)?;
+
+        if !scalar.is_integer() {
+            return Err(ErrMode::Backtrack(
+                ContextError::new()
+                    .add_context(input, &before_scalar, StrContext::Label("enum type"))
+                    .add_context(
+                        input,
+                        &before_scalar,
+                        StrContext::Expected(StrContextValue::Description("integer type")),
+                    ),
+            ));
+        }
+
+        let attrs = opt(attribute_list).parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
+
+        whitespace_and_comments_opt(input)?;
+
+        literal("{")
+            .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
             .parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        fn parse_variants<'s, T: FromStr + TypeName>(
+            input: &mut &'s str,
+        ) -> PResult<Vec<EnumVariant<'s, T>>> {
+            let variants = separated(0.., enum_variant, ",").parse_next(input)?;
+            // Consume a trailing comma, if present
+            opt(literal(",")).parse_next(input)?;
 
-        // Parse the index value
-        let idx = if input.starts_with('=') {
-            literal("=").parse_next(input)?;
+            Ok(variants)
+        }
 
-            consume_whitespace_and_comments(input)?;
-
-            let idx = Parser::parse_to(digit1).parse_next(input)?;
-
-            Some(idx)
-        } else {
-            None
+        // Parse variants according to the data type
+        let variants = match scalar {
+            ScalarType::Int8 => EnumData::Int8(parse_variants(input)?),
+            ScalarType::UInt8 => EnumData::UInt8(parse_variants(input)?),
+            ScalarType::Int16 => EnumData::Int16(parse_variants(input)?),
+            ScalarType::UInt16 => EnumData::UInt16(parse_variants(input)?),
+            ScalarType::Int32 => EnumData::Int32(parse_variants(input)?),
+            ScalarType::UInt32 => EnumData::UInt32(parse_variants(input)?),
+            ScalarType::Int64 => EnumData::Int64(parse_variants(input)?),
+            ScalarType::UInt64 => EnumData::UInt64(parse_variants(input)?),
+            _ => unreachable!(),
         };
 
-        let attrs = opt(AttributeSectionParser).parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        literal("}")
+            .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
+            .parse_next(input)?;
 
-        Ok(EnumVariant {
+        Ok(Enum {
             name: ident,
-            idx,
+            variants,
             comments,
             attributes: attrs.unwrap_or_default(),
         })
-    }
-}
-
-pub struct EnumParser;
-
-impl<'s, E> Parser<&'s str, Enum<'s>, E> for EnumParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Enum<'s>, E> {
-        trace("enum", |input: &mut _| {
-            let comments = consume_whitespace_and_comments(input)?;
-
-            literal("enum").parse_next(input)?;
-            consume_whitespace_and_comments(input)?;
-
-            let ident = parse_ident(input)?;
-            consume_whitespace_and_comments(input)?;
-
-            literal(":")
-                .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
-                .parse_next(input)?;
-            consume_whitespace_and_comments(input)?;
-
-            let before_scalar = input.checkpoint();
-
-            let scalar = ParseScalarType.parse_next(input)?;
-
-            if !scalar.is_integer() {
-                return Err(ErrMode::Backtrack(
-                    ContextError::new()
-                        .add_context(input, &before_scalar, StrContext::Label("enum type"))
-                        .add_context(
-                            input,
-                            &before_scalar,
-                            StrContext::Expected(StrContextValue::Description("integer type")),
-                        ),
-                )
-                .into());
-            }
-
-            let attrs = opt(AttributeSectionParser).parse_next(input)?;
-            consume_whitespace_and_comments(input)?;
-
-            consume_whitespace_and_comments(input)?;
-
-            literal("{")
-                .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
-                .parse_next(input)?;
-
-            fn parse_variants<'s, T: FromStr + TypeName>(
-                input: &mut &'s str,
-            ) -> PResult<Vec<EnumVariant<'s, T>>> {
-                let variants = separated(0.., EnumVariantParser, ",").parse_next(input)?;
-                // Consume a trailing comma, if present
-                opt(literal(",")).parse_next(input)?;
-
-                Ok(variants)
-            }
-
-            // Parse variants according to the data type
-            let variants = match scalar {
-                ScalarType::Int8 => EnumData::Int8(parse_variants(input)?),
-                ScalarType::UInt8 => EnumData::UInt8(parse_variants(input)?),
-                ScalarType::Int16 => EnumData::Int16(parse_variants(input)?),
-                ScalarType::UInt16 => EnumData::UInt16(parse_variants(input)?),
-                ScalarType::Int32 => EnumData::Int32(parse_variants(input)?),
-                ScalarType::UInt32 => EnumData::UInt32(parse_variants(input)?),
-                ScalarType::Int64 => EnumData::Int64(parse_variants(input)?),
-                ScalarType::UInt64 => EnumData::UInt64(parse_variants(input)?),
-                _ => unreachable!(),
-            };
-
-            consume_whitespace_and_comments(input)?;
-
-            literal("}")
-                .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
-                .parse_next(input)?;
-
-            Ok(Enum {
-                name: ident,
-                variants,
-                comments,
-                attributes: attrs.unwrap_or_default(),
-            })
-        })
-        .parse_next(input)
-    }
+    })
+    .parse_next(input)
 }
 
 #[cfg(test)]
@@ -199,8 +184,7 @@ mod tests {
                 Variant1 = 0,
                 Variant2,
                 Variant3
-            }
-        "#;
+            }"#;
 
         let enum1 = Enum {
             name: "Hello",
@@ -231,12 +215,11 @@ mod tests {
         let enum2_str = r#"
             // This is NOT documentation
             /// This is a comment!
-            enum Hello_There (bitflags) : int {
+            enum Hello_There : int (bit_flags) {
                 Variant1,
                 /// Comment
                 Variant2 = 1 (custom_attr),
-            }
-        "#;
+            }"#;
 
         let enum2 = Enum {
             name: "Hello_There",
@@ -264,8 +247,10 @@ mod tests {
         let valid = [(enum1_str, enum1), (enum2_str, enum2)];
 
         for (item_str, item) in valid {
-            let mut value = item_str;
-            assert_eq!(EnumParser.parse_next(&mut value), Ok(item));
+            assert_eq!(
+                enum_item.parse(item_str).inspect_err(|e| println!("{e}")),
+                Ok(item)
+            );
         }
 
         let enum_invalid1 = r#"
@@ -296,7 +281,7 @@ mod tests {
 
         for item in invalid {
             let mut value = item;
-            assert!(EnumParser.parse_next(&mut value).is_err());
+            assert!(enum_item.parse_next(&mut value).is_err());
         }
     }
 }

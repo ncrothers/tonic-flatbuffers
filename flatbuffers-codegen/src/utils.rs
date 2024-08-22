@@ -1,8 +1,8 @@
 use winnow::{
     ascii::till_line_ending,
-    combinator::{delimited, eof, not, repeat, trace},
-    error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
-    stream::{AsChar, Compare, Stream, StreamIsPartial},
+    combinator::{repeat, separated, trace},
+    error::{ContextError, StrContext, StrContextValue},
+    stream::{AsChar, Stream},
     token::{literal, one_of, take_till, take_while},
     PResult, Parser,
 };
@@ -29,118 +29,114 @@ impl_typename!(i8, u8, i16, u16, i32, u32, i64, u64, f32, f64);
 
 /// Returns non-whitespace tokens prefixed by whitespace. Unlike `consume_whitespace`,
 /// whitespace is purely considered to be spaces or tabs, not line endings.
-pub struct WhitespacePrefixedParser;
-
-impl<'s, E> Parser<&'s str, <&'s str as Stream>::Slice, E> for WhitespacePrefixedParser
-where
-    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice, E> {
+pub fn default_value<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice> {
+    trace("default_value", |input: &mut _| {
         // Remove whitespace at the front
-        take_while(0.., |c| AsChar::is_space(c)).parse_next(input)?;
+        whitespace_all(input)?;
+        // take_while(0.., AsChar::is_space).parse_next(input)?;
 
         take_while(1.., |c: char| {
-            !AsChar::is_space(c) && !(c.is_ascii_punctuation() && c != '_')
+            !(AsChar::is_space(c)
+                || (c.is_ascii_punctuation() && c != '_' && c != '.' && c != '-' && c != '+'))
         })
         .parse_next(input)
-    }
+    })
+    .parse_next(input)
 }
 
-pub struct IdentParser;
+pub fn namespaced_ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    trace("namespaced_ident", |input: &mut _| {
+        whitespace_all(input)?;
+        separated(1.., ident, ".")
+            .map(|()| ())
+            .take()
+            .parse_next(input)
+    })
+    .parse_next(input)
+}
 
-impl IdentParser {
-    pub fn is_valid(input: char) -> bool {
+pub fn ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    fn is_valid(input: char) -> bool {
         input.is_ascii_alphanumeric() || input == '_'
     }
 
-    /// Checks whether the character is valid in the context of a namespaced ident.
-    pub fn is_valid_namespace(input: char) -> bool {
-        Self::is_valid(input) || input == '.'
-    }
-}
-
-impl<'s, E> Parser<&'s str, <&'s str as Stream>::Slice, E> for IdentParser
-where
-    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice, E> {
-        consume_whitespace(input)?;
+    trace("namespaced_ident", |input: &mut _| {
+        whitespace_all(input)?;
         let start = input.checkpoint();
         // Make sure the first character is a valid ident start
         one_of(('a'..='z', 'A'..='Z', '_')).parse_next(input)?;
         // If it is, now parse the entire thing
         input.reset(&start);
-        take_while(1.., IdentParser::is_valid).parse_next(input)
-    }
+        let ident = take_while(1.., is_valid).parse_next(input)?;
+
+        Ok(ident)
+    })
+    .parse_next(input)
 }
 
-pub fn parse_ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
-    IdentParser.parse_next(input)
-}
+pub fn comment<'s>(input: &mut &'s str) -> PResult<Option<&'s str>> {
+    trace("comment", |input: &mut _| {
+        whitespace_all(input)?;
+        // Consume the comment start
+        literal("//").parse_next(input)?;
 
-struct CommentParser;
+        // If we still have another / left, this is documentation, and should be kept
+        let is_doc = input.starts_with('/');
 
-impl<'s, E> Parser<&'s str, Option<&'s str>, E> for CommentParser
-where
-    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Option<&'s str>, E> {
-        trace("comment_parser", |input: &mut _| {
-            consume_whitespace(input)?;
-            // Consume the comment start
-            literal("//").parse_next(input)?;
+        // Remove the leading slash when it's a documentation comment
+        if is_doc {
+            literal("/").parse_next(input)?;
+        }
 
-            // If we still have another / left, this is documentation, and should be kept
-            let is_doc = input.starts_with('/');
+        // Consume whitespace until comment
+        take_while(0.., AsChar::is_space).parse_next(input)?;
 
-            // Remove the leading slash when it's a documentation comment
-            if is_doc {
-                literal("/").parse_next(input)?;
-            }
+        let comment = till_line_ending(input)?;
 
-            // Consume whitespace until comment
-            take_while(0.., AsChar::is_space).parse_next(input)?;
-
-            let comment = till_line_ending(input)?;
-
-            // Only return the comment if it was documentation
-            if is_doc {
-                Ok(Some(comment))
-            } else {
-                Ok(None)
-            }
-        })
-        .parse_next(input)
-    }
+        // Only return the comment if it was documentation
+        if is_doc {
+            Ok(Some(comment))
+        } else {
+            Ok(None)
+        }
+    })
+    .parse_next(input)
 }
 
 /// Consumes whitespace only, including line endings
-pub fn consume_whitespace<'s>(input: &mut &'s str) -> PResult<&'s str> {
+pub fn whitespace_all<'s>(input: &mut &'s str) -> PResult<&'s str> {
     take_while(0.., (AsChar::is_newline, AsChar::is_space)).parse_next(input)
 }
 
-/// Consumes both whitespace/newlines and comments, returning any comments found along the way
-pub fn consume_whitespace_and_comments<'s>(input: &mut &'s str) -> PResult<Vec<&'s str>> {
-    consume_whitespace(input)?;
-    let comments: Vec<Option<&'s str>> = repeat(0.., CommentParser).parse_next(input)?;
-    consume_whitespace(input)?;
-    let comments: Vec<&'s str> = comments.into_iter().flatten().collect();
+fn whitespace_and_comments_min<'s>(
+    min_comments: usize,
+) -> impl Parser<&'s str, Vec<&'s str>, ContextError> {
+    move |input: &mut _| {
+        whitespace_all(input)?;
+        let comments: Vec<Option<&'s str>> = repeat(min_comments.., comment).parse_next(input)?;
+        let comments: Vec<&'s str> = comments.into_iter().flatten().collect();
 
-    Ok(comments)
+        if !input.is_empty() {
+            whitespace_all(input)?;
+        }
+
+        Ok(comments)
+    }
 }
 
-pub struct StringLiteral;
+/// Consumes both whitespace/newlines and comments, returning any comments found along the way
+pub fn whitespace_and_comments_opt<'s>(input: &mut &'s str) -> PResult<Vec<&'s str>> {
+    whitespace_and_comments_min(0).parse_next(input)
+}
 
-impl<'s, E> Parser<&'s str, <&'s str as Stream>::Slice, E> for StringLiteral
-where
-    E: ParserError<&'s str> + AddContext<&'s str, StrContext>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice, E> {
-        consume_whitespace(input)?;
+/// Consumes both whitespace/newlines and comments, returning any comments found along the way
+pub fn whitespace_and_comments_req<'s>(input: &mut &'s str) -> PResult<Vec<&'s str>> {
+    whitespace_and_comments_min(1).parse_next(input)
+}
+
+pub fn string_literal<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice> {
+    trace("string_literal", |input: &mut _| {
+        whitespace_all(input)?;
         // Try to consume an opening quotation
         literal("\"").parse_next(input)?;
         // Consume the contents of the string, disallowing multi-line strings
@@ -155,7 +151,8 @@ where
             .parse_next(input)?;
 
         Ok(value)
-    }
+    })
+    .parse_next(input)
 }
 
 #[cfg(test)]
@@ -163,19 +160,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ident() {
+    fn ident_() {
         let valid = ["foo", "_foo", "foo_", "_f_1_o_o"];
 
         for item in valid {
-            let mut value = item;
-            assert_eq!(parse_ident(&mut value), Ok(item));
+            assert_eq!(ident.parse(item), Ok(item));
         }
 
         let invalid = ["1foo", "", "111foo"];
 
         for item in invalid {
-            let mut value = item;
-            assert!(parse_ident(&mut value).is_err());
+            assert!(ident.parse(item).is_err());
+        }
+    }
+
+    #[test]
+    fn namespaced_ident_() {
+        let valid = ["foo", "namespace.foo", "one.two.three"];
+
+        for item in valid {
+            assert_eq!(namespaced_ident.parse(item), Ok(item));
+        }
+
+        let invalid = [".foo", "hello.", "test.test."];
+
+        for item in invalid {
+            assert!(namespaced_ident.parse(item).is_err());
         }
     }
 
@@ -188,15 +198,15 @@ mod tests {
                 vec!["Comment here", "Another line!"],
             ),
             (
-                "/// This is a comment\nthis is not!",
+                "/// This is a comment\n// this is not!",
                 vec!["This is a comment"],
             ),
-            ("This is not a comment", Vec::new()),
+            ("// This is not a comment", Vec::new()),
+            ("", Vec::new()),
         ];
 
         for (item_str, item) in valid {
-            let mut value = item_str;
-            assert_eq!(consume_whitespace_and_comments(&mut value), Ok(item));
+            assert_eq!(whitespace_and_comments_opt.parse(item_str), Ok(item));
         }
     }
 

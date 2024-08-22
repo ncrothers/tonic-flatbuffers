@@ -1,7 +1,9 @@
 namespace example.service;
 
 table Request {
-    foo:uint;
+    foo:
+    /// Comment goes here
+    uint;
     bar:string;
 }
 

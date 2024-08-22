@@ -6,14 +6,15 @@ use winnow::{
 };
 
 use crate::utils::{
-    consume_whitespace, consume_whitespace_and_comments, IdentParser, StringLiteral,
+    namespaced_ident, string_literal, whitespace_all, whitespace_and_comments_opt,
+    whitespace_and_comments_req,
 };
 
 use super::{
-    r#enum::{Enum, EnumParser},
-    r#struct::{Struct, StructParser},
-    table::{Table, TableParser},
-    union::{Union, UnionParser},
+    r#enum::{enum_item, Enum},
+    r#struct::{struct_item, Struct},
+    table::{table_item, Table},
+    union::{union_item, Union},
 };
 
 #[derive(Debug, PartialEq)]
@@ -40,87 +41,73 @@ where
 {
     fn parse_next(&mut self, input: &mut &'s str) -> PResult<Item<'s>, E> {
         let item = alt((
-            AttributeDeclParser.map(Item::Attribute),
-            EnumParser.map(Item::Enum),
-            FileExtensionParser.map(Item::FileExtension),
-            FileIdentifierParser.map(Item::FileIdentifier),
-            IncludeParser.map(Item::Include),
-            NamespaceParser.map(Item::Namespace),
-            RootTypeParser.map(Item::RootType),
-            StructParser.map(Item::Struct),
-            TableParser.map(Item::Table),
-            UnionParser.map(Item::Union),
+            attribute_decl.map(Item::Attribute),
+            enum_item.map(Item::Enum),
+            file_extension.map(Item::FileExtension),
+            file_identifier.map(Item::FileIdentifier),
+            include.map(Item::Include),
+            namespace.map(Item::Namespace),
+            root_type.map(Item::RootType),
+            struct_item.map(Item::Struct),
+            table_item.map(Item::Table),
+            union_item.map(Item::Union),
+            // As last resort, parse to end of file and keep any comments
+            whitespace_and_comments_req.map(Item::Comment),
         ))
         .context(StrContext::Expected(
             winnow::error::StrContextValue::Description("flatbuffer statement"),
         ))
         .parse_next(input)?;
 
-        consume_whitespace(input)?;
+        whitespace_all(input)?;
 
         Ok(item)
     }
 }
 
-struct AttributeDeclParser;
-
-impl<'s, E> Parser<&'s str, &'s str, E> for AttributeDeclParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<&'s str, E> {
-        consume_whitespace_and_comments(input)?;
+fn attribute_decl<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    trace("attribute_decl", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
 
         literal("attribute").parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
 
-        let attr_val = StringLiteral.parse_next(input)?;
+        let attr_val = string_literal.parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         literal(";").parse_next(input)?;
 
         Ok(attr_val)
-    }
+    })
+    .parse_next(input)
 }
 
-struct FileExtensionParser;
-
-impl<'s, E> Parser<&'s str, &'s str, E> for FileExtensionParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<&'s str, E> {
-        consume_whitespace_and_comments(input)?;
+fn file_extension<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    trace("file_extension", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
 
         literal("file_extension").parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
 
-        let attr_val = StringLiteral.parse_next(input)?;
+        let attr_val = string_literal.parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         literal(";").parse_next(input)?;
 
         Ok(attr_val)
-    }
+    })
+    .parse_next(input)
 }
 
-struct FileIdentifierParser;
-
-impl<'s, E> Parser<&'s str, &'s str, E> for FileIdentifierParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<&'s str, E> {
-        consume_whitespace_and_comments(input)?;
+fn file_identifier<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    trace("file_identifier", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
 
         literal("file_identifier").parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
 
         let attr_val = delimited(
             "\"",
@@ -129,81 +116,64 @@ where
         )
         .parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         literal(";").parse_next(input)?;
 
         Ok(attr_val)
-    }
+    })
+    .parse_next(input)
 }
 
-struct IncludeParser;
-
-impl<'s, E> Parser<&'s str, &'s str, E> for IncludeParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<&'s str, E> {
-        consume_whitespace_and_comments(input)?;
+pub fn include<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    trace("include", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
 
         literal("include").parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
 
-        let attr_val = StringLiteral.parse_next(input)?;
+        let attr_val = string_literal.parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         literal(";").parse_next(input)?;
 
         Ok(attr_val)
-    }
+    })
+    .parse_next(input)
 }
 
-struct NamespaceParser;
+pub fn namespace<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    trace("namespace", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
 
-impl<'s, E> Parser<&'s str, &'s str, E> for NamespaceParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<&'s str, E> {
-        trace("namespace", |input: &mut _| {
-            consume_whitespace_and_comments(input)?;
+        literal("namespace").parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
 
-            literal("namespace").parse_next(input)?;
-            consume_whitespace_and_comments(input)?;
+        let namespace = namespaced_ident.parse_next(input)?;
 
-            let namespace = take_while(1.., IdentParser::is_valid_namespace).parse_next(input)?;
-
-            consume_whitespace_and_comments(input)?;
-            literal(";").parse_next(input)?;
-
-            Ok(namespace)
-        })
-        .parse_next(input)
-    }
-}
-
-struct RootTypeParser;
-
-impl<'s, E> Parser<&'s str, &'s str, E> for RootTypeParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<&'s str, E> {
-        consume_whitespace_and_comments(input)?;
-
-        literal("root_type").parse_next(input)?;
-        consume_whitespace_and_comments(input)?;
-
-        let namespace = take_while(1.., IdentParser::is_valid_namespace).parse_next(input)?;
-
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         literal(";").parse_next(input)?;
 
         Ok(namespace)
-    }
+    })
+    .parse_next(input)
+}
+
+pub fn root_type<'s>(input: &mut &'s str) -> PResult<&'s str> {
+    trace("root_type", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
+
+        literal("root_type").parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
+
+        let namespace = namespaced_ident.parse_next(input)?;
+
+        whitespace_and_comments_opt(input)?;
+        literal(";").parse_next(input)?;
+
+        Ok(namespace)
+    })
+    .parse_next(input)
 }
 
 #[cfg(test)]

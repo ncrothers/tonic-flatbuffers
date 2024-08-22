@@ -1,15 +1,15 @@
 use winnow::{
-    combinator::opt,
-    error::{AddContext, ContextError, ErrMode, ParserError, StrContext, StrContextValue},
+    combinator::{opt, trace},
+    error::{StrContext, StrContextValue},
     token::literal,
     PResult, Parser,
 };
 
-use crate::utils::{consume_whitespace, consume_whitespace_and_comments, parse_ident, IdentParser};
+use crate::utils::{ident, whitespace_all, whitespace_and_comments_opt};
 
 use super::{
-    attributes::{Attribute, AttributeSectionParser},
-    primitives::{ParseStructFieldType, StructFieldType},
+    attributes::{attribute_list, Attribute},
+    primitives::{struct_field_type, StructFieldType},
 };
 
 #[derive(Debug, PartialEq)]
@@ -28,17 +28,11 @@ pub struct Struct<'a> {
     attributes: Vec<Attribute<'a>>,
 }
 
-struct StructFieldParser;
-
-impl<'s, E> Parser<&'s str, StructField<'s>, E> for StructFieldParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<StructField<'s>, E> {
-        let comments = consume_whitespace_and_comments(input)?;
+fn struct_field<'s>(input: &mut &'s str) -> PResult<StructField<'s>> {
+    trace("struct_field", |input: &mut _| {
+        let comments = whitespace_and_comments_opt(input)?;
         // Get the field ident
-        let ident = IdentParser
+        let ident = ident
             .context(StrContext::Expected(StrContextValue::Description(
                 "struct field identifier",
             )))
@@ -48,15 +42,15 @@ where
             .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
             .parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         // Consume the opening bracket
-        let field_type = ParseStructFieldType.parse_next(input)?;
+        let field_type = struct_field_type.parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
 
-        let attrs = opt(AttributeSectionParser).parse_next(input)?;
+        let attrs = opt(attribute_list).parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
 
         literal(";")
             .context(StrContext::Expected(StrContextValue::StringLiteral(";")))
@@ -68,27 +62,22 @@ where
             comments,
             attributes: attrs.unwrap_or_default(),
         })
-    }
+    })
+    .parse_next(input)
 }
 
-pub struct StructParser;
-
-impl<'s, E> Parser<&'s str, Struct<'s>, E> for StructParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Struct<'s>, E> {
-        let comments = consume_whitespace_and_comments(input)?;
+pub fn struct_item<'s>(input: &mut &'s str) -> PResult<Struct<'s>> {
+    trace("struct", |input: &mut _| {
+        let comments = whitespace_and_comments_opt(input)?;
         // Parse the keyword
         literal("struct").parse_next(input)?;
 
         // Get the struct ident
-        let ident = parse_ident(input)?;
+        let ident = ident.parse_next(input)?;
 
-        let attrs = opt(AttributeSectionParser).parse_next(input)?;
+        let attrs = opt(attribute_list).parse_next(input)?;
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         // Consume the opening bracket
         literal("{")
             .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
@@ -96,16 +85,16 @@ where
 
         // Consume whitespace instead of comments here so the any comments get
         // added to the field
-        consume_whitespace(input)?;
+        whitespace_all(input)?;
 
         let mut fields = Vec::new();
 
         // Consume as many struct fields as possible
-        while let Some(field) = opt(StructFieldParser).parse_next(input)? {
+        while let Some(field) = opt(struct_field).parse_next(input)? {
             fields.push(field);
         }
 
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
         literal("}")
             .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
             .parse_next(input)?;
@@ -116,7 +105,8 @@ where
             comments,
             attributes: attrs.unwrap_or_default(),
         })
-    }
+    })
+    .parse_next(input)
 }
 
 #[cfg(test)]
@@ -197,7 +187,7 @@ mod tests {
 
         for (item_str, item) in valid {
             let value = item_str;
-            let res = StructParser.parse(value).inspect_err(|e| println!("{e}"));
+            let res = struct_item.parse(value).inspect_err(|e| println!("{e}"));
             assert_eq!(res, Ok(item));
         }
 
@@ -221,7 +211,7 @@ mod tests {
 
         for item in invalid {
             let mut value = item;
-            assert!(StructParser.parse_next(&mut value).is_err());
+            assert!(struct_item.parse_next(&mut value).is_err());
         }
     }
 }

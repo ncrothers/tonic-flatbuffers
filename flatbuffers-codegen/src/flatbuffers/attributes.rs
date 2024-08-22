@@ -1,15 +1,13 @@
 use winnow::{
     ascii::digit1,
     combinator::{separated, trace},
-    error::{
-        AddContext, ContextError, ErrMode, InputError, ParserError, StrContext, StrContextValue,
-    },
+    error::{AddContext, ContextError, ErrMode, InputError, StrContext, StrContextValue},
     stream::{AsChar, Stream},
     token::{literal, take_till},
     PResult, Parser,
 };
 
-use crate::utils::{consume_whitespace_and_comments, parse_ident, StringLiteral};
+use crate::utils::{ident, string_literal, whitespace_and_comments_opt};
 
 #[derive(Debug, PartialEq)]
 pub enum Attribute<'a> {
@@ -99,20 +97,14 @@ impl<'a> Attribute<'a> {
     }
 }
 
-struct AttributeParser;
-
-impl<'s, E> Parser<&'s str, Attribute<'s>, E> for AttributeParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Attribute<'s>, E> {
-        consume_whitespace_and_comments(input)?;
+fn parse_attribute<'s>(input: &mut &'s str) -> PResult<Attribute<'s>> {
+    trace("attribute", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
         // Get the attribute ident
-        let ident = parse_ident(input)?;
+        let ident = ident.parse_next(input)?;
 
         // Consume any whitespace and/or newlines
-        consume_whitespace_and_comments(input)?;
+        whitespace_and_comments_opt(input)?;
 
         let mut attr = Attribute::from_ident(ident);
 
@@ -124,10 +116,10 @@ where
             .is_ok()
         {
             if attr.has_value() {
-                consume_whitespace_and_comments(input)?;
+                whitespace_and_comments_opt(input)?;
 
                 if attr.has_str_value() {
-                    let value = StringLiteral.parse_next(input)?;
+                    let value = string_literal.parse_next(input)?;
 
                     attr.insert_value_str(value);
                 } else if attr.has_u64_value() {
@@ -172,44 +164,29 @@ where
                             "no value for this attribute type",
                         )),
                     );
-                return Err(ErrMode::Backtrack(err).into());
+                return Err(ErrMode::Backtrack(err));
             }
         }
 
         Ok(attr)
-    }
+    })
+    .parse_next(input)
 }
 
-fn parse_attribute<'s>(input: &mut &'s str) -> PResult<Attribute<'s>> {
-    AttributeParser.parse_next(input)
-}
+pub fn attribute_list<'s>(input: &mut &'s str) -> PResult<Vec<Attribute<'s>>> {
+    trace("attribute_list", |input: &mut _| {
+        whitespace_and_comments_opt(input)?;
+        literal("(").parse_next(input)?;
 
-pub struct AttributeSectionParser;
+        let attrs = separated(1.., parse_attribute, ",").parse_next(input)?;
 
-impl<'s, E> Parser<&'s str, Vec<Attribute<'s>>, E> for AttributeSectionParser
-where
-    E: AddContext<&'s str, StrContext> + ParserError<&'s str>,
-    ErrMode<E>: From<ErrMode<ContextError>>,
-{
-    fn parse_next(&mut self, input: &mut &'s str) -> PResult<Vec<Attribute<'s>>, E> {
-        trace("attribute_section", |input: &mut _| {
-            consume_whitespace_and_comments(input)?;
-            literal("(").parse_next(input)?;
+        whitespace_and_comments_opt(input)?;
 
-            let attrs = separated(1.., AttributeParser, ",").parse_next(input)?;
+        literal(")").parse_next(input)?;
 
-            consume_whitespace_and_comments(input)?;
-
-            literal(")").parse_next(input)?;
-
-            Ok(attrs)
-        })
-        .parse_next(input)
-    }
-}
-
-pub fn parse_attributes<'s>(input: &mut &'s str) -> PResult<Vec<Attribute<'s>>> {
-    AttributeSectionParser.parse_next(input)
+        Ok(attrs)
+    })
+    .parse_next(input)
 }
 
 #[cfg(test)]
@@ -269,14 +246,14 @@ mod tests {
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(AttributeSectionParser.parse_next(&mut value), Ok(item));
+            assert_eq!(attribute_list.parse_next(&mut value), Ok(item));
         }
 
         let invalid = ["id: 1", "(id: 1", "(id:1,)"];
 
         for item in invalid {
             let mut value = item;
-            let attr = AttributeSectionParser.parse_next(&mut value);
+            let attr = attribute_list.parse_next(&mut value);
             assert!(attr.is_err());
         }
     }
