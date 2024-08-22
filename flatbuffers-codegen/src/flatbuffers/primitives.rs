@@ -53,7 +53,7 @@ pub enum BuiltInTable<'a> {
     String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScalarType {
     /// Alias of `byte`
     Int8,
@@ -76,6 +76,50 @@ pub enum ScalarType {
     UInt64,
     /// Alias of `double`
     Float64,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum DefaultValue<'a> {
+    /// Alias of `byte`
+    Int8(i8),
+    /// Alias of `ubyte`
+    UInt8(u8),
+    Bool(bool),
+    /// Alias of `short`
+    Int16(i16),
+    /// Alias of `ushort`
+    UInt16(u16),
+    /// Alias of `int`
+    Int32(i32),
+    /// Alias of `uint`
+    UInt32(u32),
+    /// Alias of `float`
+    Float32(f32),
+    /// Alias of `long`
+    Int64(i64),
+    /// Alias of `ulong`
+    UInt64(u64),
+    /// Alias of `double`
+    Float64(f64),
+    Named(&'a str),
+}
+
+impl<'a> DefaultValue<'a> {
+    pub fn parse(value: &'a str, scalar_type: ScalarType) -> Option<Self> {
+        match scalar_type {
+            ScalarType::Int8 => value.parse().ok().map(DefaultValue::Int8),
+            ScalarType::UInt8 => value.parse().ok().map(DefaultValue::UInt8),
+            ScalarType::Bool => value.parse().ok().map(DefaultValue::Bool),
+            ScalarType::Int16 => value.parse().ok().map(DefaultValue::Int16),
+            ScalarType::UInt16 => value.parse().ok().map(DefaultValue::UInt16),
+            ScalarType::Int32 => value.parse().ok().map(DefaultValue::Int32),
+            ScalarType::UInt32 => value.parse().ok().map(DefaultValue::UInt32),
+            ScalarType::Float32 => value.parse().ok().map(DefaultValue::Float32),
+            ScalarType::Int64 => value.parse().ok().map(DefaultValue::Int64),
+            ScalarType::UInt64 => value.parse().ok().map(DefaultValue::UInt64),
+            ScalarType::Float64 => value.parse().ok().map(DefaultValue::Float64),
+        }
+    }
 }
 
 impl ScalarType {

@@ -1,11 +1,13 @@
 use winnow::{
     ascii::till_line_ending,
     combinator::{repeat, separated, trace},
-    error::{ContextError, StrContext, StrContextValue},
+    error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::{AsChar, Stream},
     token::{literal, one_of, take_till, take_while},
     PResult, Parser,
 };
+
+use crate::flatbuffers::primitives::{DefaultValue, TableFieldType};
 
 macro_rules! impl_typename {
     ($($type:ty),*) => {
@@ -29,19 +31,59 @@ impl_typename!(i8, u8, i16, u16, i32, u32, i64, u64, f32, f64);
 
 /// Returns non-whitespace tokens prefixed by whitespace. Unlike `consume_whitespace`,
 /// whitespace is purely considered to be spaces or tabs, not line endings.
-pub fn default_value<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice> {
-    trace("default_value", |input: &mut _| {
-        // Remove whitespace at the front
-        whitespace_all(input)?;
-        // take_while(0.., AsChar::is_space).parse_next(input)?;
+pub fn default_value<'a, 's>(
+    field_type: &'a TableFieldType<'s>,
+) -> impl Parser<&'s str, DefaultValue<'s>, ContextError> + 'a {
+    move |input: &mut &'s str| {
+        let checkpoint = input.checkpoint();
 
-        take_while(1.., |c: char| {
-            !(AsChar::is_space(c)
-                || (c.is_ascii_punctuation() && c != '_' && c != '.' && c != '-' && c != '+'))
+        trace("default_value", |input: &mut _| {
+            // Remove whitespace at the front
+            whitespace_all(input)?;
+            // take_while(0.., AsChar::is_space).parse_next(input)?;
+
+            take_while(1.., |c: char| {
+                !(AsChar::is_space(c)
+                    || (c.is_ascii_punctuation() && c != '_' && c != '.' && c != '-' && c != '+'))
+            })
+            .parse_next(input)
         })
         .parse_next(input)
-    })
-    .parse_next(input)
+        .and_then(|default| {
+            match field_type {
+                TableFieldType::Scalar(scalar) => {
+                    DefaultValue::parse(default, *scalar).ok_or_else(|| {
+                        ErrMode::Cut(
+                            ContextError::new()
+                                .add_context(input, &checkpoint, StrContext::Label("default value"))
+                                .add_context(
+                                    input,
+                                    &checkpoint,
+                                    StrContext::Expected(StrContextValue::Description(
+                                        "invalid default value for field type",
+                                    )),
+                                ),
+                        )
+                    })
+                }
+                TableFieldType::String | TableFieldType::Vector(_) => Err(ErrMode::Cut(
+                    ContextError::new()
+                        .add_context(input, &checkpoint, StrContext::Label("default value"))
+                        .add_context(
+                            input,
+                            &checkpoint,
+                            StrContext::Expected(StrContextValue::Description(
+                                "non-scalar values can't have a default",
+                            )),
+                        ),
+                )),
+                TableFieldType::Named(_) => {
+                    // TODO: How to validate this? Only allowed for enums, and must be a valid enum variant
+                    Ok(DefaultValue::Named(default))
+                }
+            }
+        })
+    }
 }
 
 pub fn namespaced_ident<'s>(input: &mut &'s str) -> PResult<&'s str> {

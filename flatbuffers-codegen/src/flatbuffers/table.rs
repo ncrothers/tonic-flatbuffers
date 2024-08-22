@@ -1,5 +1,5 @@
 use winnow::{
-    combinator::{opt, preceded, trace},
+    combinator::{cut_err, opt, preceded, trace},
     error::{StrContext, StrContextValue},
     token::literal,
     PResult, Parser,
@@ -9,14 +9,14 @@ use crate::utils::{default_value, ident, whitespace_all, whitespace_and_comments
 
 use super::{
     attributes::{attribute_list, Attribute},
-    primitives::{table_field_type, TableFieldType},
+    primitives::{table_field_type, DefaultValue, TableFieldType},
 };
 
 #[derive(Debug, PartialEq)]
 pub struct TableField<'a> {
     name: &'a str,
     field_type: TableFieldType<'a>,
-    default: Option<&'a str>,
+    default: Option<DefaultValue<'a>>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
 }
@@ -44,7 +44,7 @@ fn table_field<'s>(input: &mut &'s str) -> PResult<TableField<'s>> {
 
         whitespace_and_comments_opt(input)?;
 
-        let default = opt(preceded("=", default_value)).parse_next(input)?;
+        let default = opt(preceded("=", default_value(&field_type))).parse_next(input)?;
 
         whitespace_and_comments_opt(input)?;
 
@@ -74,13 +74,14 @@ pub fn table_item<'s>(input: &mut &'s str) -> PResult<Table<'s>> {
             .parse_next(input)?;
 
         // Get the table ident
-        let ident = ident.parse_next(input)?;
+        let ident = cut_err(ident).parse_next(input)?;
 
         let attrs = opt(attribute_list).parse_next(input)?;
 
         whitespace_and_comments_opt(input)?;
         // Consume the opening bracket
-        literal("{").parse_next(input)?;
+        cut_err(literal("{").context(StrContext::Expected(StrContextValue::CharLiteral('{'))))
+            .parse_next(input)?;
 
         // Consume whitespace instead of comments here so the any comments get
         // added to the field
@@ -94,7 +95,8 @@ pub fn table_item<'s>(input: &mut &'s str) -> PResult<Table<'s>> {
         }
 
         whitespace_and_comments_opt(input)?;
-        literal("}").parse_next(input)?;
+        cut_err(literal("}").context(StrContext::Expected(StrContextValue::CharLiteral('}'))))
+            .parse_next(input)?;
 
         Ok(Table {
             name: ident,
@@ -140,11 +142,12 @@ mod tests {
                 foo:[int32];
                 bar:
                     /// This is a random comment that shouldn't be loaded
-                    float = 1.5 (deprecated);
+                    float = -1e-6 (deprecated);
                 /// Another comment
                 another: [
                     Struct2
                 ];
+                enum_field: TestEnum = Variant1;
                 /// This should be ignored
             }"#;
 
@@ -161,7 +164,7 @@ mod tests {
                 TableField {
                     name: "bar",
                     field_type: TableFieldType::Scalar(ScalarType::Float32),
-                    default: Some("1.5"),
+                    default: Some(DefaultValue::Float32(-1.0e-6)),
                     comments: Vec::new(),
                     attributes: vec![Attribute::Deprecated],
                 },
@@ -170,6 +173,13 @@ mod tests {
                     field_type: TableFieldType::Vector(VectorItemType::Named("Struct2")),
                     default: None,
                     comments: vec!["Another comment"],
+                    attributes: Vec::new(),
+                },
+                TableField {
+                    name: "enum_field",
+                    field_type: TableFieldType::Named("TestEnum"),
+                    default: Some(DefaultValue::Named("Variant1")),
+                    comments: Vec::new(),
                     attributes: Vec::new(),
                 },
             ],
@@ -186,23 +196,34 @@ mod tests {
             );
         }
 
-        let struct_invalid1 = r#"
+        let table_invalid1 = r#"
             table Hello_There {
                 foo:uint32
             }
         "#;
 
-        let struct_invalid2 = r#"
+        let table_invalid2 = r#"
             table Hello_There {
                 foo:[uint32:5]
             }
         "#;
 
-        let struct_invalid3 = r#"
+        let table_invalid3 = r#"
             table Hello There {}
         "#;
 
-        let invalid = [struct_invalid1, struct_invalid2, struct_invalid3];
+        let table_invalid4 = r#"
+            table Test {
+                foo:uint32 = 1.5;
+            }
+        "#;
+
+        let invalid = [
+            table_invalid1,
+            table_invalid2,
+            table_invalid3,
+            table_invalid4,
+        ];
 
         for item in invalid {
             let mut value = item;

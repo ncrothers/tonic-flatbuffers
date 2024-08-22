@@ -54,9 +54,6 @@ where
             // As last resort, parse to end of file and keep any comments
             whitespace_and_comments_req.map(Item::Comment),
         ))
-        .context(StrContext::Expected(
-            winnow::error::StrContextValue::Description("flatbuffer statement"),
-        ))
         .parse_next(input)?;
 
         whitespace_all(input)?;

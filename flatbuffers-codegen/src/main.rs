@@ -1,9 +1,12 @@
-use flatbuffers_codegen::{parser::parse_file, utils::whitespace_and_comments_opt};
-use winnow::Parser;
+use flatbuffers_codegen::parser::parse_file;
 
 fn main() {
-    let input = "";
-    let res = whitespace_and_comments_opt.parse(input).unwrap();
+    let input = r#"
+        table Test {
+            foo:uint32 = 1;
+            bar:string = hello;
+        }"#;
+    let res = parse_file(input).unwrap();
     println!("{res:?}");
 
     let file = std::fs::read_to_string("../examples/helloworld/fbs/service2.fbs").unwrap();
