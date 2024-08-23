@@ -12,11 +12,9 @@ use crate::flatbuffers::primitives::{DefaultValue, TableFieldType};
 macro_rules! impl_typename {
     ($($type:ty),*) => {
         $(
-            paste::paste! {
-                impl TypeName for $type {
-                    fn type_name() -> &'static str {
-                        stringify!($type)
-                    }
+            impl TypeName for $type {
+                fn type_name() -> &'static str {
+                    stringify!($type)
                 }
             }
         )*

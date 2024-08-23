@@ -1,11 +1,14 @@
 use winnow::{
     combinator::{cut_err, opt, preceded, trace},
-    error::{StrContext, StrContextValue},
+    error::{ContextError, StrContext, StrContextValue},
     token::literal,
-    PResult, Parser,
+    Parser,
 };
 
-use crate::utils::{default_value, ident, whitespace_all, whitespace_and_comments_opt};
+use crate::{
+    parser::ParserState,
+    utils::{default_value, ident, whitespace_all, whitespace_and_comments_opt},
+};
 
 use super::{
     attributes::{attribute_list, Attribute},
@@ -24,88 +27,98 @@ pub struct TableField<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Table<'a> {
     name: &'a str,
+    namespace: &'a str,
     fields: Vec<TableField<'a>>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
 }
 
-fn table_field<'s>(input: &mut &'s str) -> PResult<TableField<'s>> {
-    trace("table_field", |input: &mut _| {
-        let comments = whitespace_and_comments_opt(input)?;
-        // Get the field ident
-        let ident = ident.parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+fn table_field<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, TableField<'s>, ContextError> + 'a {
+    move |input: &mut _| {
+        trace("table_field", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
+            // Get the field ident
+            let ident = ident.parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        literal(":").parse_next(input)?;
+            literal(":").parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        let field_type = table_field_type.parse_next(input)?;
+            let field_type = table_field_type.parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        let default = opt(preceded("=", default_value(&field_type))).parse_next(input)?;
+            let default = opt(preceded("=", default_value(&field_type))).parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        let attrs = opt(attribute_list).parse_next(input)?;
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
 
-        literal(";").parse_next(input)?;
+            literal(";").parse_next(input)?;
 
-        Ok(TableField {
-            name: ident,
-            field_type,
-            default,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(TableField {
+                name: ident,
+                field_type,
+                default,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
+    }
 }
 
-pub fn table_item<'s>(input: &mut &'s str) -> PResult<Table<'s>> {
-    trace("table", |input: &mut _| {
-        let comments = whitespace_and_comments_opt(input)?;
-        // Parse the keyword
-        literal("table")
-            .context(StrContext::Expected(StrContextValue::StringLiteral(
-                "table",
-            )))
-            .parse_next(input)?;
+pub fn table_item<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, Table<'s>, ContextError> + 'a {
+    move |input: &mut _| {
+        trace("table", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
+            // Parse the keyword
+            literal("table")
+                .context(StrContext::Expected(StrContextValue::StringLiteral(
+                    "table",
+                )))
+                .parse_next(input)?;
 
-        // Get the table ident
-        let ident = cut_err(ident).parse_next(input)?;
+            // Get the table ident
+            let ident = cut_err(ident).parse_next(input)?;
 
-        let attrs = opt(attribute_list).parse_next(input)?;
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
-        // Consume the opening bracket
-        cut_err(literal("{").context(StrContext::Expected(StrContextValue::CharLiteral('{'))))
-            .parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
+            // Consume the opening bracket
+            cut_err(literal("{").context(StrContext::Expected(StrContextValue::CharLiteral('{'))))
+                .parse_next(input)?;
 
-        // Consume whitespace instead of comments here so the any comments get
-        // added to the field
-        whitespace_all(input)?;
+            // Consume whitespace instead of comments here so the any comments get
+            // added to the field
+            whitespace_all(input)?;
 
-        let mut fields = Vec::new();
+            let mut fields = Vec::new();
 
-        // Consume as many table fields as possible
-        while let Some(field) = opt(table_field).parse_next(input)? {
-            fields.push(field);
-        }
+            // Consume as many table fields as possible
+            while let Some(field) = opt(table_field(state)).parse_next(input)? {
+                fields.push(field);
+            }
 
-        whitespace_and_comments_opt(input)?;
-        cut_err(literal("}").context(StrContext::Expected(StrContextValue::CharLiteral('}'))))
-            .parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
+            cut_err(literal("}").context(StrContext::Expected(StrContextValue::CharLiteral('}'))))
+                .parse_next(input)?;
 
-        Ok(Table {
-            name: ident,
-            fields,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(Table {
+                name: ident,
+                namespace: state.namespace(),
+                fields,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +136,7 @@ mod tests {
 
         let table1 = Table {
             name: "Hello",
+            namespace: "",
             fields: vec![TableField {
                 name: "foo",
                 field_type: TableFieldType::Scalar(ScalarType::UInt32),
@@ -153,6 +167,7 @@ mod tests {
 
         let table2 = Table {
             name: "Hello_There",
+            namespace: "",
             fields: vec![
                 TableField {
                     name: "foo",
@@ -187,11 +202,15 @@ mod tests {
             attributes: vec![Attribute::OriginalOrder],
         };
 
+        let state = ParserState::new();
+
         let valid = [(table1_str, table1), (table2_str, table2)];
 
         for (item_str, item) in valid {
             assert_eq!(
-                table_item.parse(item_str).inspect_err(|e| println!("{e}")),
+                table_item(&state)
+                    .parse(item_str)
+                    .inspect_err(|e| println!("{e}")),
                 Ok(item)
             );
         }
@@ -199,24 +218,20 @@ mod tests {
         let table_invalid1 = r#"
             table Hello_There {
                 foo:uint32
-            }
-        "#;
+            }"#;
 
         let table_invalid2 = r#"
             table Hello_There {
                 foo:[uint32:5]
-            }
-        "#;
+            }"#;
 
         let table_invalid3 = r#"
-            table Hello There {}
-        "#;
+            table Hello There {}"#;
 
         let table_invalid4 = r#"
             table Test {
                 foo:uint32 = 1.5;
-            }
-        "#;
+            }"#;
 
         let invalid = [
             table_invalid1,
@@ -226,8 +241,7 @@ mod tests {
         ];
 
         for item in invalid {
-            let mut value = item;
-            assert!(table_item.parse_next(&mut value).is_err());
+            assert!(table_item(&state).parse(item).is_err());
         }
     }
 }

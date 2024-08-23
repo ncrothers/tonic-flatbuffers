@@ -11,6 +11,7 @@ use winnow::{
 
 use crate::{
     flatbuffers::primitives::scalar_type,
+    parser::ParserState,
     utils::{ident, whitespace_and_comments_opt, TypeName},
 };
 
@@ -50,127 +51,142 @@ pub enum EnumData<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Enum<'a> {
     name: &'a str,
+    namespace: &'a str,
     variants: EnumData<'a>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
 }
 
-fn enum_variant<'s, T>(input: &mut &'s str) -> PResult<EnumVariant<'s, T>>
+fn enum_variant<'a, 's: 'a, T>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, EnumVariant<'s, T>, ContextError> + 'a
 where
     T: FromStr + TypeName,
 {
-    let comments = whitespace_and_comments_opt(input)?;
+    move |input: &mut _| {
+        trace("enum_variant", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
 
-    let ident = ident
-        .context(StrContext::Expected(StrContextValue::Description(
-            "enum identifier",
-        )))
-        .parse_next(input)?;
+            let ident = ident
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "enum identifier",
+                )))
+                .parse_next(input)?;
 
-    whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-    // Parse the index value
-    let idx = if input.starts_with('=') {
-        literal("=").parse_next(input)?;
+            // Parse the index value
+            let idx = if input.starts_with('=') {
+                literal("=").parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+                whitespace_and_comments_opt(input)?;
 
-        let idx = Parser::parse_to(digit1).parse_next(input)?;
+                let idx = Parser::parse_to(digit1).parse_next(input)?;
 
-        Some(idx)
-    } else {
-        None
-    };
+                Some(idx)
+            } else {
+                None
+            };
 
-    let attrs = opt(attribute_list).parse_next(input)?;
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
 
-    whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-    Ok(EnumVariant {
-        name: ident,
-        idx,
-        comments,
-        attributes: attrs.unwrap_or_default(),
-    })
+            Ok(EnumVariant {
+                name: ident,
+                idx,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
+        })
+        .parse_next(input)
+    }
 }
 
-pub fn enum_item<'s>(input: &mut &'s str) -> PResult<Enum<'s>> {
-    trace("enum", |input: &mut _| {
-        let comments = whitespace_and_comments_opt(input)?;
+pub fn enum_item<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, Enum<'s>, ContextError> + 'a {
+    move |input: &mut _| {
+        trace("enum", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
 
-        literal("enum").parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+            literal("enum").parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        let ident = ident.parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+            let ident = ident.parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        literal(":")
-            .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
-            .parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+            literal(":")
+                .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
+                .parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        let before_scalar = input.checkpoint();
+            let before_scalar = input.checkpoint();
 
-        let scalar = scalar_type.parse_next(input)?;
+            let scalar = scalar_type.parse_next(input)?;
 
-        if !scalar.is_integer() {
-            return Err(ErrMode::Backtrack(
-                ContextError::new()
-                    .add_context(input, &before_scalar, StrContext::Label("enum type"))
-                    .add_context(
-                        input,
-                        &before_scalar,
-                        StrContext::Expected(StrContextValue::Description("integer type")),
-                    ),
-            ));
-        }
+            if !scalar.is_integer() {
+                return Err(ErrMode::Backtrack(
+                    ContextError::new()
+                        .add_context(input, &before_scalar, StrContext::Label("enum type"))
+                        .add_context(
+                            input,
+                            &before_scalar,
+                            StrContext::Expected(StrContextValue::Description("integer type")),
+                        ),
+                ));
+            }
 
-        let attrs = opt(attribute_list).parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        literal("{")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
-            .parse_next(input)?;
+            literal("{")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
+                .parse_next(input)?;
 
-        fn parse_variants<'s, T: FromStr + TypeName>(
-            input: &mut &'s str,
-        ) -> PResult<Vec<EnumVariant<'s, T>>> {
-            let variants = separated(0.., enum_variant, ",").parse_next(input)?;
-            // Consume a trailing comma, if present
-            opt(literal(",")).parse_next(input)?;
+            fn parse_variants<'a, 's: 'a, T: FromStr + TypeName>(
+                state: &'a ParserState<'s>,
+            ) -> impl Parser<&'s str, Vec<EnumVariant<'s, T>>, ContextError> + 'a {
+                move |input: &mut _| {
+                    let variants = separated(0.., enum_variant(state), ",").parse_next(input)?;
+                    // Consume a trailing comma, if present
+                    opt(literal(",")).parse_next(input)?;
 
-            Ok(variants)
-        }
+                    Ok(variants)
+                }
+            }
 
-        // Parse variants according to the data type
-        let variants = match scalar {
-            ScalarType::Int8 => EnumData::Int8(parse_variants(input)?),
-            ScalarType::UInt8 => EnumData::UInt8(parse_variants(input)?),
-            ScalarType::Int16 => EnumData::Int16(parse_variants(input)?),
-            ScalarType::UInt16 => EnumData::UInt16(parse_variants(input)?),
-            ScalarType::Int32 => EnumData::Int32(parse_variants(input)?),
-            ScalarType::UInt32 => EnumData::UInt32(parse_variants(input)?),
-            ScalarType::Int64 => EnumData::Int64(parse_variants(input)?),
-            ScalarType::UInt64 => EnumData::UInt64(parse_variants(input)?),
-            _ => unreachable!(),
-        };
+            // Parse variants according to the data type
+            let variants = match scalar {
+                ScalarType::Int8 => EnumData::Int8(parse_variants(state).parse_next(input)?),
+                ScalarType::UInt8 => EnumData::UInt8(parse_variants(state).parse_next(input)?),
+                ScalarType::Int16 => EnumData::Int16(parse_variants(state).parse_next(input)?),
+                ScalarType::UInt16 => EnumData::UInt16(parse_variants(state).parse_next(input)?),
+                ScalarType::Int32 => EnumData::Int32(parse_variants(state).parse_next(input)?),
+                ScalarType::UInt32 => EnumData::UInt32(parse_variants(state).parse_next(input)?),
+                ScalarType::Int64 => EnumData::Int64(parse_variants(state).parse_next(input)?),
+                ScalarType::UInt64 => EnumData::UInt64(parse_variants(state).parse_next(input)?),
+                _ => unreachable!(),
+            };
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        literal("}")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
-            .parse_next(input)?;
+            literal("}")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
+                .parse_next(input)?;
 
-        Ok(Enum {
-            name: ident,
-            variants,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(Enum {
+                name: ident,
+                namespace: state.namespace(),
+                variants,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
+    }
 }
 
 #[cfg(test)]
@@ -188,6 +204,7 @@ mod tests {
 
         let enum1 = Enum {
             name: "Hello",
+            namespace: "",
             variants: EnumData::UInt32(vec![
                 EnumVariant {
                     name: "Variant1",
@@ -223,6 +240,7 @@ mod tests {
 
         let enum2 = Enum {
             name: "Hello_There",
+            namespace: "",
             variants: EnumData::Int32(vec![
                 EnumVariant {
                     name: "Variant1",
@@ -246,9 +264,13 @@ mod tests {
 
         let valid = [(enum1_str, enum1), (enum2_str, enum2)];
 
+        let state = ParserState::new();
+
         for (item_str, item) in valid {
             assert_eq!(
-                enum_item.parse(item_str).inspect_err(|e| println!("{e}")),
+                enum_item(&state)
+                    .parse(item_str)
+                    .inspect_err(|e| println!("{e}")),
                 Ok(item)
             );
         }
@@ -281,7 +303,7 @@ mod tests {
 
         for item in invalid {
             let mut value = item;
-            assert!(enum_item.parse_next(&mut value).is_err());
+            assert!(enum_item(&state).parse_next(&mut value).is_err());
         }
     }
 }

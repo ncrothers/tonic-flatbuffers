@@ -1,11 +1,14 @@
 use winnow::{
     combinator::{opt, separated, trace},
-    error::{StrContext, StrContextValue},
+    error::{ContextError, StrContext, StrContextValue},
     token::literal,
-    PResult, Parser,
+    Parser,
 };
 
-use crate::utils::{ident, namespaced_ident, whitespace_and_comments_opt};
+use crate::{
+    parser::ParserState,
+    utils::{ident, namespaced_ident, whitespace_and_comments_opt},
+};
 
 use super::attributes::{attribute_list, Attribute};
 
@@ -22,85 +25,95 @@ pub struct UnionVariant<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Union<'a> {
     name: &'a str,
+    namespace: &'a str,
     variants: Vec<UnionVariant<'a>>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
 }
 
-fn union_variant<'s>(input: &mut &'s str) -> PResult<UnionVariant<'s>> {
-    trace("union_variant", |input: &mut _| {
-        let comments = whitespace_and_comments_opt(input)?;
+fn union_variant<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, UnionVariant<'s>, ContextError> + 'a {
+    move |input: &mut _| {
+        trace("union_variant", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
 
-        let ident = namespaced_ident
-            .context(StrContext::Expected(StrContextValue::Description(
-                "enum identifier",
-            )))
-            .parse_next(input)?;
-
-        whitespace_and_comments_opt(input)?;
-
-        // Parse the index value
-        let aliased_type = if input.starts_with(':') {
-            literal(":").parse_next(input)?;
+            let ident = namespaced_ident
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "enum identifier",
+                )))
+                .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
-            let actual_type = namespaced_ident.parse_next(input)?;
+            // Parse the index value
+            let aliased_type = if input.starts_with(':') {
+                literal(":").parse_next(input)?;
 
-            Some(actual_type)
-        } else {
-            None
-        };
+                whitespace_and_comments_opt(input)?;
 
-        let attrs = opt(attribute_list).parse_next(input)?;
+                let actual_type = namespaced_ident.parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+                Some(actual_type)
+            } else {
+                None
+            };
 
-        Ok(UnionVariant {
-            name: ident,
-            aliased_type: aliased_type.unwrap_or(ident),
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
+
+            whitespace_and_comments_opt(input)?;
+
+            Ok(UnionVariant {
+                name: ident,
+                aliased_type: aliased_type.unwrap_or(ident),
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
+    }
 }
 
-pub fn union_item<'s>(input: &mut &'s str) -> PResult<Union<'s>> {
-    trace("union", |input: &mut _| {
-        let comments = whitespace_and_comments_opt(input)?;
+pub fn union_item<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, Union<'s>, ContextError> + 'a {
+    move |input: &mut _| {
+        trace("union", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
 
-        literal("union").parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+            literal("union").parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        let ident = ident.parse_next(input)?;
+            let ident = ident.parse_next(input)?;
 
-        let attrs = opt(attribute_list).parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        literal("{")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
-            .parse_next(input)?;
+            literal("{")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
+                .parse_next(input)?;
 
-        let variants = separated(0.., union_variant, ",").parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
-        // Consume trailing comma if present
-        opt(literal(",")).parse_next(input)?;
+            let variants = separated(0.., union_variant(state), ",").parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
+            // Consume trailing comma if present
+            opt(literal(",")).parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        literal("}")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
-            .parse_next(input)?;
+            literal("}")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
+                .parse_next(input)?;
 
-        Ok(Union {
-            name: ident,
-            variants,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(Union {
+                name: ident,
+                namespace: state.namespace(),
+                variants,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +131,7 @@ mod tests {
 
         let enum1 = Union {
             name: "Hello",
+            namespace: "",
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
@@ -154,6 +168,7 @@ mod tests {
 
         let enum2 = Union {
             name: "Hello_There",
+            namespace: "",
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
@@ -178,41 +193,40 @@ mod tests {
             }],
         };
 
+        let state = ParserState::new();
+
         let valid = [(enum1_str, enum1), (enum2_str, enum2)];
 
         for (item_str, item) in valid {
-            let res = union_item.parse(item_str).inspect_err(|e| println!("{e}"));
+            let res = union_item(&state)
+                .parse(item_str)
+                .inspect_err(|e| println!("{e}"));
             assert_eq!(res, Ok(item));
         }
 
         let enum_invalid1 = r#"
-            union Hello_There : int32 {}
-        "#;
+            union Hello_There : int32 {}"#;
 
         let enum_invalid2 = r#"
             union Hello_There {
                 Variant = 1,
-            }
-        "#;
+            }"#;
 
         let enum_invalid3 = r#"
             union Hello_There {
                 Variant1:,
-            }
-        "#;
+            }"#;
 
         let enum_invalid4 = r#"
             union Hello_There {
                 Variant1,
                 :Variant2
-            }
-        "#;
+            }"#;
 
         let invalid = [enum_invalid1, enum_invalid2, enum_invalid3, enum_invalid4];
 
         for item in invalid {
-            let mut value = item;
-            assert!(union_item.parse_next(&mut value).is_err());
+            assert!(union_item(&state).parse(item).is_err());
         }
     }
 }

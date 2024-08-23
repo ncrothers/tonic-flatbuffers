@@ -1,11 +1,14 @@
 use winnow::{
     combinator::{opt, trace},
-    error::{StrContext, StrContextValue},
+    error::{ContextError, StrContext, StrContextValue},
     token::literal,
-    PResult, Parser,
+    Parser,
 };
 
-use crate::utils::{ident, whitespace_all, whitespace_and_comments_opt};
+use crate::{
+    parser::ParserState,
+    utils::{ident, whitespace_all, whitespace_and_comments_opt},
+};
 
 use super::{
     attributes::{attribute_list, Attribute},
@@ -23,90 +26,100 @@ pub struct StructField<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Struct<'a> {
     name: &'a str,
+    namespace: &'a str,
     fields: Vec<StructField<'a>>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
 }
 
-fn struct_field<'s>(input: &mut &'s str) -> PResult<StructField<'s>> {
-    trace("struct_field", |input: &mut _| {
-        let comments = whitespace_and_comments_opt(input)?;
-        // Get the field ident
-        let ident = ident
-            .context(StrContext::Expected(StrContextValue::Description(
-                "struct field identifier",
-            )))
-            .parse_next(input)?;
+fn struct_field<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, StructField<'s>, ContextError> + 'a {
+    move |input: &mut _| {
+        trace("struct_field", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
+            // Get the field ident
+            let ident = ident
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "struct field identifier",
+                )))
+                .parse_next(input)?;
 
-        literal(":")
-            .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
-            .parse_next(input)?;
+            literal(":")
+                .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
+                .parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
-        // Consume the opening bracket
-        let field_type = struct_field_type.parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
+            // Consume the opening bracket
+            let field_type = struct_field_type.parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        let attrs = opt(attribute_list).parse_next(input)?;
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
+            whitespace_and_comments_opt(input)?;
 
-        literal(";")
-            .context(StrContext::Expected(StrContextValue::StringLiteral(";")))
-            .parse_next(input)?;
+            literal(";")
+                .context(StrContext::Expected(StrContextValue::StringLiteral(";")))
+                .parse_next(input)?;
 
-        Ok(StructField {
-            name: ident,
-            field_type,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(StructField {
+                name: ident,
+                field_type,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
+    }
 }
 
-pub fn struct_item<'s>(input: &mut &'s str) -> PResult<Struct<'s>> {
-    trace("struct", |input: &mut _| {
-        let comments = whitespace_and_comments_opt(input)?;
-        // Parse the keyword
-        literal("struct").parse_next(input)?;
+pub fn struct_item<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, Struct<'s>, ContextError> + 'a {
+    move |input: &mut _| {
+        trace("struct", |input: &mut _| {
+            let comments = whitespace_and_comments_opt(input)?;
+            // Parse the keyword
+            literal("struct").parse_next(input)?;
 
-        // Get the struct ident
-        let ident = ident.parse_next(input)?;
+            // Get the struct ident
+            let ident = ident.parse_next(input)?;
 
-        let attrs = opt(attribute_list).parse_next(input)?;
+            let attrs = opt(attribute_list(state)).parse_next(input)?;
 
-        whitespace_and_comments_opt(input)?;
-        // Consume the opening bracket
-        literal("{")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
-            .parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
+            // Consume the opening bracket
+            literal("{")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
+                .parse_next(input)?;
 
-        // Consume whitespace instead of comments here so the any comments get
-        // added to the field
-        whitespace_all(input)?;
+            // Consume whitespace instead of comments here so the any comments get
+            // added to the field
+            whitespace_all(input)?;
 
-        let mut fields = Vec::new();
+            let mut fields = Vec::new();
 
-        // Consume as many struct fields as possible
-        while let Some(field) = opt(struct_field).parse_next(input)? {
-            fields.push(field);
-        }
+            // Consume as many struct fields as possible
+            while let Some(field) = opt(struct_field(state)).parse_next(input)? {
+                fields.push(field);
+            }
 
-        whitespace_and_comments_opt(input)?;
-        literal("}")
-            .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
-            .parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
+            literal("}")
+                .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
+                .parse_next(input)?;
 
-        Ok(Struct {
-            name: ident,
-            fields,
-            comments,
-            attributes: attrs.unwrap_or_default(),
+            Ok(Struct {
+                name: ident,
+                namespace: state.namespace(),
+                fields,
+                comments,
+                attributes: attrs.unwrap_or_default(),
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
+    }
 }
 
 #[cfg(test)]
@@ -124,6 +137,7 @@ mod tests {
 
         let struct1 = Struct {
             name: "Hello",
+            namespace: "",
             fields: vec![StructField {
                 name: "foo",
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
@@ -153,6 +167,7 @@ mod tests {
 
         let struct2 = Struct {
             name: "Hello_There",
+            namespace: "",
             fields: vec![
                 StructField {
                     name: "foo",
@@ -185,33 +200,33 @@ mod tests {
 
         let valid = [(struct1_str, struct1), (struct2_str, struct2)];
 
+        let state = ParserState::new();
+
         for (item_str, item) in valid {
             let value = item_str;
-            let res = struct_item.parse(value).inspect_err(|e| println!("{e}"));
+            let res = struct_item(&state)
+                .parse(value)
+                .inspect_err(|e| println!("{e}"));
             assert_eq!(res, Ok(item));
         }
 
         let struct_invalid1 = r#"
             struct Hello_There {
                 foo:uint32
-            }
-        "#;
+            }"#;
 
         let struct_invalid2 = r#"
             struct Hello_There {
                 foo:[uint32]
-            }
-        "#;
+            }"#;
 
         let struct_invalid3 = r#"
-            struct Hello There {}
-        "#;
+            struct Hello There {}"#;
 
         let invalid = [struct_invalid1, struct_invalid2, struct_invalid3];
 
         for item in invalid {
-            let mut value = item;
-            assert!(struct_item.parse_next(&mut value).is_err());
+            assert!(struct_item(&state).parse(item).is_err());
         }
     }
 }
