@@ -4,7 +4,7 @@ use winnow::{
     error::{AddContext, ContextError, ErrMode, InputError, StrContext, StrContextValue},
     stream::{AsChar, Stream},
     token::{literal, take_till},
-    PResult, Parser,
+    Parser,
 };
 
 use crate::{
@@ -101,7 +101,7 @@ impl<'a> Attribute<'a> {
 }
 
 fn parse_attribute<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    _state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Attribute<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("attribute", |input: &mut _| {

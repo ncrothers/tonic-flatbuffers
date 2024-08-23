@@ -47,11 +47,20 @@ fn table_field<'a, 's: 'a>(
 
             whitespace_and_comments_opt(input)?;
 
-            let field_type = table_field_type.parse_next(input)?;
+            let field_type = table_field_type(state).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
-            let default = opt(preceded("=", default_value(&field_type))).parse_next(input)?;
+            // If the next token is =, require a default
+            let default = if input.starts_with('=') {
+                Some(
+                    cut_err(preceded("=", default_value(&field_type)))
+                        .context(StrContext::Label("default value for field type"))
+                        .parse_next(input)?,
+                )
+            } else {
+                None
+            };
 
             whitespace_and_comments_opt(input)?;
 
@@ -123,7 +132,12 @@ pub fn table_item<'a, 's: 'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::flatbuffers::primitives::{ScalarType, VectorItemType};
+    use std::collections::HashMap;
+
+    use crate::{
+        flatbuffers::primitives::{ScalarType, VectorItemType},
+        parser::TypeDecls,
+    };
 
     use super::*;
 
@@ -161,7 +175,7 @@ mod tests {
                 another: [
                     Struct2
                 ];
-                enum_field: TestEnum = Variant1;
+                enum_field: [TestEnum] = [];
                 /// This should be ignored
             }"#;
 
@@ -192,8 +206,8 @@ mod tests {
                 },
                 TableField {
                     name: "enum_field",
-                    field_type: TableFieldType::Named("TestEnum"),
-                    default: Some(DefaultValue::Named("Variant1")),
+                    field_type: TableFieldType::Vector(VectorItemType::Named("TestEnum")),
+                    default: Some(DefaultValue::Vector),
                     comments: Vec::new(),
                     attributes: Vec::new(),
                 },
@@ -202,7 +216,12 @@ mod tests {
             attributes: vec![Attribute::OriginalOrder],
         };
 
-        let state = ParserState::new();
+        let mut state = ParserState::new();
+        let mut decl = TypeDecls::new();
+        decl.add_structs(["Struct2"]);
+        decl.add_enums(["TestEnum"]);
+
+        state.extend_decls(HashMap::from([("", decl)]));
 
         let valid = [(table1_str, table1), (table2_str, table2)];
 

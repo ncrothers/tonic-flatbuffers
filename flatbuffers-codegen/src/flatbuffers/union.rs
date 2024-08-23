@@ -1,13 +1,14 @@
 use winnow::{
     combinator::{opt, separated, trace},
     error::{ContextError, StrContext, StrContextValue},
+    stream::Stream,
     token::literal,
     Parser,
 };
 
 use crate::{
-    parser::ParserState,
-    utils::{ident, namespaced_ident, whitespace_and_comments_opt},
+    parser::{DeclType, ParserState},
+    utils::{ident, resolved_ident, whitespace_and_comments_opt},
 };
 
 use super::attributes::{attribute_list, Attribute};
@@ -17,7 +18,7 @@ pub struct UnionVariant<'a> {
     /// Name of the variant
     name: &'a str,
     /// Will be the same as `name` when no alias is given
-    aliased_type: &'a str,
+    actual_type: &'a str,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
 }
@@ -38,34 +39,48 @@ fn union_variant<'a, 's: 'a>(
         trace("union_variant", |input: &mut _| {
             let comments = whitespace_and_comments_opt(input)?;
 
-            let ident = namespaced_ident
-                .context(StrContext::Expected(StrContextValue::Description(
-                    "enum identifier",
-                )))
+            let checkpoint = input.checkpoint();
+
+            // Parse the type as a namespace, then check if there's an alias
+            let ident = separated(1.., ident, ".")
+                .map(|()| ())
+                .take()
                 .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
-            // Parse the index value
-            let aliased_type = if input.starts_with(':') {
-                literal(":").parse_next(input)?;
-
-                whitespace_and_comments_opt(input)?;
-
-                let actual_type = namespaced_ident.parse_next(input)?;
-
-                Some(actual_type)
+            // If it's not aliased, reset back to the checkpoint and proceed
+            // This works because, regardless, the next item we parsed must be a resolved type,
+            // whether we roll back or not
+            let is_aliased = if literal::<_, _, ContextError>(":")
+                .parse_next(input)
+                .is_err()
+            {
+                // Not aliased, so we need to backtrack and parse the type as a resolved type instead
+                input.reset(&checkpoint);
+                false
             } else {
-                None
+                true
             };
+
+            // Parse the actual type, must be a table
+            let actual_type = resolved_ident(state, &[DeclType::Table])
+                .context(StrContext::Label("union variant type"))
+                .parse_next(input)?;
+
+            whitespace_and_comments_opt(input)?;
 
             let attrs = opt(attribute_list(state)).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
+            // If aliased, the name is the ident
+            // Otherwise, the name is the same as the actual type
+            let name = if is_aliased { ident } else { actual_type };
+
             Ok(UnionVariant {
-                name: ident,
-                aliased_type: aliased_type.unwrap_or(ident),
+                name,
+                actual_type,
                 comments,
                 attributes: attrs.unwrap_or_default(),
             })
@@ -118,10 +133,14 @@ pub fn union_item<'a, 's: 'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use crate::parser::TypeDecls;
+
     use super::*;
 
     #[test]
-    fn r#enum() {
+    fn r#union() {
         let enum1_str = r#"
             union Hello {
                 Variant1,
@@ -135,19 +154,19 @@ mod tests {
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
-                    aliased_type: "Variant1",
+                    actual_type: "Variant1",
                     comments: Vec::new(),
                     attributes: Vec::new(),
                 },
                 UnionVariant {
                     name: "Variant2",
-                    aliased_type: "Variant1",
+                    actual_type: "Variant1",
                     comments: Vec::new(),
                     attributes: Vec::new(),
                 },
                 UnionVariant {
                     name: "Variant3",
-                    aliased_type: "Variant3",
+                    actual_type: "Variant3",
                     comments: Vec::new(),
                     attributes: Vec::new(),
                 },
@@ -161,7 +180,7 @@ mod tests {
             /// This is a comment!
             union Hello_There (custom) {
                 /// Comment 1
-                Variant1:AnotherType,
+                Variant1:Variant3,
                 /// Comment 2
                 Variant2 (custom_attr),
             }"#;
@@ -172,13 +191,13 @@ mod tests {
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
-                    aliased_type: "AnotherType",
+                    actual_type: "Variant3",
                     comments: vec!["Comment 1"],
                     attributes: Vec::new(),
                 },
                 UnionVariant {
                     name: "Variant2",
-                    aliased_type: "Variant2",
+                    actual_type: "Variant2",
                     comments: vec!["Comment 2"],
                     attributes: vec![Attribute::Custom {
                         name: "custom_attr",
@@ -193,7 +212,11 @@ mod tests {
             }],
         };
 
-        let state = ParserState::new();
+        let mut state = ParserState::new();
+        let mut decl = TypeDecls::new();
+        decl.add_tables(["Variant1", "Variant2", "Variant3"]);
+
+        state.extend_decls(HashMap::from([("", decl)]));
 
         let valid = [(enum1_str, enum1), (enum2_str, enum2)];
 

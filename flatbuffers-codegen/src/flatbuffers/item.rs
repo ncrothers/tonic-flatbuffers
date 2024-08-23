@@ -1,14 +1,14 @@
 use winnow::{
-    combinator::{alt, delimited, trace},
+    combinator::{alt, delimited, separated, trace},
     error::ContextError,
     token::{literal, take_while},
-    PResult, Parser,
+    Parser,
 };
 
 use crate::{
-    parser::ParserState,
+    parser::{DeclType, ParserState},
     utils::{
-        namespaced_ident, string_literal, whitespace_all, whitespace_and_comments_opt,
+        ident, resolved_ident, string_literal, whitespace_all, whitespace_and_comments_opt,
         whitespace_and_comments_req,
     },
 };
@@ -65,7 +65,7 @@ pub fn item<'a, 's: 'a>(
 }
 
 fn attribute_decl<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    _state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("attribute_decl", |input: &mut _| {
@@ -87,7 +87,7 @@ fn attribute_decl<'a, 's: 'a>(
 }
 
 fn file_extension<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    _state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("file_extension", |input: &mut _| {
@@ -109,7 +109,7 @@ fn file_extension<'a, 's: 'a>(
 }
 
 fn file_identifier<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    _state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("file_identifier", |input: &mut _| {
@@ -136,7 +136,7 @@ fn file_identifier<'a, 's: 'a>(
 }
 
 pub fn include<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    _state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("include", |input: &mut _| {
@@ -167,7 +167,10 @@ pub fn namespace<'a, 's: 'a>(
             literal("namespace").parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
-            let namespace = namespaced_ident.parse_next(input)?;
+            let namespace = separated(1.., ident, ".")
+                .map(|()| ())
+                .take()
+                .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             literal(";").parse_next(input)?;
@@ -190,7 +193,7 @@ pub fn root_type<'a, 's: 'a>(
             literal("root_type").parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
-            let namespace = namespaced_ident.parse_next(input)?;
+            let namespace = resolved_ident(state, &[DeclType::Table]).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             literal(";").parse_next(input)?;
@@ -203,11 +206,20 @@ pub fn root_type<'a, 's: 'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use crate::parser::TypeDecls;
+
     use super::*;
 
     #[test]
     fn r#struct() {
         let mut state_ = ParserState::new();
+        let mut decl = TypeDecls::new();
+        decl.add_tables(["Table"]);
+
+        state_.extend_decls(HashMap::from([("", decl)]));
+
         let state = &mut state_;
 
         assert_eq!(
@@ -233,10 +245,6 @@ mod tests {
             Ok(Item::Include("file.fbs"))
         );
         assert_eq!(
-            item(state).parse("namespace one.two.three;"),
-            Ok(Item::Namespace("one.two.three"))
-        );
-        assert_eq!(
             item(state).parse("root_type Table;"),
             Ok(Item::RootType("Table"))
         );
@@ -252,5 +260,9 @@ mod tests {
             item(state).parse("union test {}"),
             Ok(Item::Union(_))
         ));
+        assert_eq!(
+            item(state).parse("namespace one.two.three;"),
+            Ok(Item::Namespace("one.two.three"))
+        );
     }
 }

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use winnow::{
     ascii::till_line_ending,
     combinator::{repeat, separated, trace},
@@ -7,7 +9,10 @@ use winnow::{
     PResult, Parser,
 };
 
-use crate::flatbuffers::primitives::{DefaultValue, TableFieldType};
+use crate::{
+    flatbuffers::primitives::{DefaultValue, ScalarType, TableFieldType},
+    parser::{DeclType, ParserState},
+};
 
 macro_rules! impl_typename {
     ($($type:ty),*) => {
@@ -27,72 +32,149 @@ pub trait TypeName {
 
 impl_typename!(i8, u8, i16, u16, i32, u32, i64, u64, f32, f64);
 
+pub fn parse_to_scalar<T>(input: &mut &str) -> PResult<T>
+where
+    T: FromStr,
+{
+    take_while(1.., |c: char| {
+        !(AsChar::is_space(c)
+            || (c.is_ascii_punctuation() && c != '_' && c != '.' && c != '-' && c != '+'))
+    })
+    .parse_to()
+    .parse_next(input)
+}
+
 /// Returns non-whitespace tokens prefixed by whitespace. Unlike `consume_whitespace`,
 /// whitespace is purely considered to be spaces or tabs, not line endings.
 pub fn default_value<'a, 's>(
     field_type: &'a TableFieldType<'s>,
 ) -> impl Parser<&'s str, DefaultValue<'s>, ContextError> + 'a {
     move |input: &mut &'s str| {
-        let checkpoint = input.checkpoint();
-
-        trace("default_value", |input: &mut _| {
+        trace("default_value", |input: &mut &'s str| {
+            let checkpoint = input.checkpoint();
             // Remove whitespace at the front
             whitespace_all(input)?;
-            // take_while(0.., AsChar::is_space).parse_next(input)?;
 
-            take_while(1.., |c: char| {
-                !(AsChar::is_space(c)
-                    || (c.is_ascii_punctuation() && c != '_' && c != '.' && c != '-' && c != '+'))
-            })
-            .parse_next(input)
-        })
-        .parse_next(input)
-        .and_then(|default| {
             match field_type {
-                TableFieldType::Scalar(scalar) => {
-                    DefaultValue::parse(default, *scalar).ok_or_else(|| {
-                        ErrMode::Cut(
-                            ContextError::new()
-                                .add_context(input, &checkpoint, StrContext::Label("default value"))
-                                .add_context(
-                                    input,
-                                    &checkpoint,
-                                    StrContext::Expected(StrContextValue::Description(
-                                        "invalid default value for field type",
-                                    )),
-                                ),
-                        )
-                    })
+                TableFieldType::Scalar(scalar) => match scalar {
+                    ScalarType::Int8 => parse_to_scalar
+                        .map(DefaultValue::Int8)
+                        .context(StrContext::Expected(StrContextValue::Description("int8")))
+                        .parse_next(input),
+                    ScalarType::UInt8 => parse_to_scalar
+                        .map(DefaultValue::UInt8)
+                        .context(StrContext::Expected(StrContextValue::Description("uint8")))
+                        .parse_next(input),
+                    ScalarType::Bool => parse_to_scalar
+                        .map(DefaultValue::Bool)
+                        .context(StrContext::Expected(StrContextValue::Description("bool")))
+                        .parse_next(input),
+                    ScalarType::Int16 => parse_to_scalar
+                        .map(DefaultValue::Int16)
+                        .context(StrContext::Expected(StrContextValue::Description("int16")))
+                        .parse_next(input),
+                    ScalarType::UInt16 => parse_to_scalar
+                        .map(DefaultValue::UInt16)
+                        .context(StrContext::Expected(StrContextValue::Description("uint16")))
+                        .parse_next(input),
+                    ScalarType::Int32 => parse_to_scalar
+                        .map(DefaultValue::Int32)
+                        .context(StrContext::Expected(StrContextValue::Description("int32")))
+                        .parse_next(input),
+                    ScalarType::UInt32 => parse_to_scalar
+                        .map(DefaultValue::UInt32)
+                        .context(StrContext::Expected(StrContextValue::Description("uint32")))
+                        .parse_next(input),
+                    ScalarType::Float32 => parse_to_scalar
+                        .map(DefaultValue::Float32)
+                        .context(StrContext::Expected(StrContextValue::Description(
+                            "float32",
+                        )))
+                        .parse_next(input),
+                    ScalarType::Int64 => parse_to_scalar
+                        .map(DefaultValue::Int64)
+                        .context(StrContext::Expected(StrContextValue::Description("int64")))
+                        .parse_next(input),
+                    ScalarType::UInt64 => parse_to_scalar
+                        .map(DefaultValue::UInt64)
+                        .context(StrContext::Expected(StrContextValue::Description("uint64")))
+                        .parse_next(input),
+                    ScalarType::Float64 => parse_to_scalar
+                        .map(DefaultValue::Float64)
+                        .context(StrContext::Expected(StrContextValue::Description(
+                            "float64",
+                        )))
+                        .parse_next(input),
+                },
+                TableFieldType::String => {
+                    let value = string_literal
+                        .context(StrContext::Expected(StrContextValue::Description(
+                            "string literal",
+                        )))
+                        .parse_next(input)?;
+
+                    Ok(DefaultValue::String(value))
                 }
-                TableFieldType::String | TableFieldType::Vector(_) => Err(ErrMode::Cut(
+                TableFieldType::Vector(_) => {
+                    // Flatbuffers only allows for empty vectors as a default
+                    literal('[').parse_next(input)?;
+                    whitespace_and_comments_opt(input)?;
+                    literal(']').parse_next(input)?;
+
+                    Ok(DefaultValue::Vector)
+                }
+                _ => Err(ErrMode::Cut(
                     ContextError::new()
                         .add_context(input, &checkpoint, StrContext::Label("default value"))
                         .add_context(
                             input,
                             &checkpoint,
                             StrContext::Expected(StrContextValue::Description(
-                                "non-scalar values can't have a default",
+                                "default values for this type are not supported",
                             )),
                         ),
                 )),
-                TableFieldType::Named(_) => {
-                    // TODO: How to validate this? Only allowed for enums, and must be a valid enum variant
-                    Ok(DefaultValue::Named(default))
-                }
             }
         })
+        .parse_next(input)
     }
 }
 
-pub fn namespaced_ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
-    trace("namespaced_ident", |input: &mut _| {
-        whitespace_all(input)?;
-        separated(1.., ident, ".")
-            .map(|()| ())
-            .take()
-            .parse_next(input)
-    })
-    .parse_next(input)
+/// Parse a namespaced ident, checking against the allowed types from [`ParserState`]
+pub fn resolved_ident<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+    decl_types: &'a [DeclType],
+) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
+    |input: &mut _| {
+        trace("resolved_ident", |input: &mut _| {
+            whitespace_all(input)?;
+            let checkpoint = input.checkpoint();
+            let ident = separated(1.., ident, ".")
+                .map(|()| ())
+                .take()
+                .parse_next(input)?;
+
+            // Try the ident literally, then prepend the cur_namespace
+            if !(state.resolve_any(ident, decl_types)
+                || state.resolve_any(&format!("{}.{}", state.namespace(), ident), decl_types))
+            {
+                return Err(ErrMode::Cut(
+                    ContextError::new()
+                        .add_context(input, &checkpoint, StrContext::Label("type"))
+                        .add_context(
+                            input,
+                            &checkpoint,
+                            StrContext::Expected(StrContextValue::Description(
+                                "valid type, could not be found",
+                            )),
+                        ),
+                ));
+            }
+
+            Ok(ident)
+        })
+        .parse_next(input)
+    }
 }
 
 pub fn ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
@@ -100,7 +182,7 @@ pub fn ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
         input.is_ascii_alphanumeric() || input == '_'
     }
 
-    trace("namespaced_ident", |input: &mut _| {
+    trace("ident", |input: &mut _| {
         whitespace_all(input)?;
         let start = input.checkpoint();
         // Make sure the first character is a valid ident start
@@ -178,13 +260,16 @@ pub fn string_literal<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::S
     trace("string_literal", |input: &mut _| {
         whitespace_all(input)?;
         // Try to consume an opening quotation
-        literal("\"").parse_next(input)?;
+        literal("\"")
+            .context(StrContext::Expected(StrContextValue::Description(
+                "opening quotation",
+            )))
+            .parse_next(input)?;
         // Consume the contents of the string, disallowing multi-line strings
         let value = take_till(0.., |c| c == '"' || AsChar::is_newline(c)).parse_next(input)?;
 
         // Try to consume a closing quotation
         literal("\"")
-            .context(StrContext::Label("string literal"))
             .context(StrContext::Expected(StrContextValue::Description(
                 "closing quotation",
             )))
@@ -197,6 +282,10 @@ pub fn string_literal<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::S
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use crate::parser::TypeDecls;
+
     use super::*;
 
     #[test]
@@ -215,17 +304,30 @@ mod tests {
     }
 
     #[test]
-    fn namespaced_ident_() {
-        let valid = ["foo", "namespace.foo", "one.two.three"];
+    fn resolved_ident_() {
+        let mut state = ParserState::new();
+
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_structs(["foo"]);
+
+        let decls = HashMap::from([
+            ("", foo_decl.clone()),
+            ("namespace", foo_decl.clone()),
+            ("one.two.three", foo_decl.clone()),
+        ]);
+
+        state.extend_decls(decls);
+
+        let valid = ["foo", "namespace.foo", "one.two.three.foo"];
 
         for item in valid {
-            assert_eq!(namespaced_ident.parse(item), Ok(item));
+            assert_eq!(resolved_ident(&state, DeclType::ANY).parse(item), Ok(item));
         }
 
         let invalid = [".foo", "hello.", "test.test."];
 
         for item in invalid {
-            assert!(namespaced_ident.parse(item).is_err());
+            assert!(resolved_ident(&state, DeclType::ANY).parse(item).is_err());
         }
     }
 

@@ -6,7 +6,7 @@ use winnow::{
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::Stream,
     token::literal,
-    PResult, Parser,
+    Parser,
 };
 
 use crate::{

@@ -1,13 +1,16 @@
 use winnow::{
     ascii::digit1,
-    combinator::trace,
+    combinator::{alt, trace},
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::Stream,
     token::literal,
     PResult, Parser,
 };
 
-use crate::utils::{ident, namespaced_ident, whitespace_and_comments_opt};
+use crate::{
+    parser::{DeclType, ParserState},
+    utils::{ident, resolved_ident, whitespace_and_comments_opt},
+};
 
 #[derive(Debug, PartialEq)]
 pub struct Array<'a> {
@@ -34,7 +37,7 @@ pub enum TableFieldType<'a> {
 #[derive(Debug, PartialEq)]
 pub enum StructFieldType<'a> {
     Array(Array<'a>),
-    Struct(&'a str),
+    Named(&'a str),
     Scalar(ScalarType),
 }
 
@@ -101,11 +104,12 @@ pub enum DefaultValue<'a> {
     UInt64(u64),
     /// Alias of `double`
     Float64(f64),
-    Named(&'a str),
+    String(&'a str),
+    Vector,
 }
 
 impl<'a> DefaultValue<'a> {
-    pub fn parse(value: &'a str, scalar_type: ScalarType) -> Option<Self> {
+    pub fn parse_scalar(value: &'a str, scalar_type: ScalarType) -> Option<Self> {
         match scalar_type {
             ScalarType::Int8 => value.parse().ok().map(DefaultValue::Int8),
             ScalarType::UInt8 => value.parse().ok().map(DefaultValue::UInt8),
@@ -155,122 +159,151 @@ impl ScalarType {
     }
 }
 
-pub fn array_type<'s>(input: &mut &'s str) -> PResult<Array<'s>> {
-    trace("array_type", |input: &mut _| {
-        whitespace_and_comments_opt(input)?;
-        // Try to consume an opening square bracket
-        literal("[").parse_next(input)?;
-        // Clear out any whitespace
-        whitespace_and_comments_opt(input)?;
+pub fn array_type<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, Array<'s>, ContextError> + 'a {
+    |input: &mut _| {
+        trace("array_type", |input: &mut _| {
+            whitespace_and_comments_opt(input)?;
+            // Try to consume an opening square bracket
+            literal("[").parse_next(input)?;
+            // Clear out any whitespace
+            whitespace_and_comments_opt(input)?;
 
-        // Parse the item type
-        let item_type = namespaced_ident.parse_next(input).map(|ident| {
-            if let Some(scalar) = ScalarType::parse(ident) {
-                ArrayItemType::Scalar(scalar)
+            // Parse the item type
+            let item_type = alt((
+                scalar_type.map(ArrayItemType::Scalar),
+                resolved_ident(state, &[DeclType::Enum, DeclType::Struct])
+                    .map(ArrayItemType::Named),
+            ))
+            .parse_next(input)?;
+            // let item_type = resolved_ident(state, &[DeclType::Enum, DeclType::Struct]).parse_next(input).map(|ident| {
+            //     if let Some(scalar) = ScalarType::parse(ident) {
+            //         ArrayItemType::Scalar(scalar)
+            //     } else {
+            //         ArrayItemType::Named(ident)
+            //     }
+            // })?;
+
+            whitespace_and_comments_opt(input)?;
+
+            // Consume the delimiter
+            literal(":").parse_next(input)?;
+            whitespace_and_comments_opt(input)?;
+
+            // let length_start = input.checkpoint();
+            let length = Parser::parse_to(digit1).parse_next(input)?;
+
+            whitespace_and_comments_opt(input)?;
+            // Try to consume a closing square bracket
+            literal("]")
+                .context(StrContext::Label("array"))
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "closing bracket",
+                )))
+                .parse_next(input)?;
+
+            Ok(Array { item_type, length })
+        })
+        .parse_next(input)
+    }
+}
+
+pub fn struct_field_type<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, StructFieldType<'s>, ContextError> + 'a {
+    |input: &mut _| {
+        trace("struct_field_type", |input: &mut _| {
+            whitespace_and_comments_opt(input)?;
+            // Parse as vector
+            let val = if input.starts_with('[') {
+                let array = array_type(state).parse_next(input)?;
+
+                StructFieldType::Array(array)
             } else {
-                ArrayItemType::Named(ident)
-            }
-        })?;
+                alt((
+                    scalar_type.map(StructFieldType::Scalar),
+                    resolved_ident(state, &[DeclType::Enum, DeclType::Struct])
+                        .map(StructFieldType::Named),
+                ))
+                .parse_next(input)?
 
-        whitespace_and_comments_opt(input)?;
+                // let ident = resolved_ident(state, &[DeclType::Enum, DeclType::Struct]).parse_next(input)?;
 
-        // Consume the delimiter
-        literal(":").parse_next(input)?;
-        whitespace_and_comments_opt(input)?;
+                // if let Some(scalar) = ScalarType::parse(ident) {
+                //     StructFieldType::Scalar(scalar)
+                // } else {
 
-        // let length_start = input.checkpoint();
-        let length = Parser::parse_to(digit1).parse_next(input)?;
+                //     StructFieldType::Named(ident)
+                // }
+            };
 
-        whitespace_and_comments_opt(input)?;
-        // Try to consume a closing square bracket
-        literal("]")
-            .context(StrContext::Label("array"))
-            .context(StrContext::Expected(StrContextValue::Description(
-                "closing bracket",
-            )))
+            Ok(val)
+        })
+        .parse_next(input)
+    }
+}
+
+pub fn vector_type<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, VectorItemType<'s>, ContextError> + 'a {
+    |input: &mut _| {
+        trace("vector_type", |input: &mut _| {
+            whitespace_and_comments_opt(input)?;
+            // Try to consume an opening square bracket
+            literal("[").parse_next(input)?;
+            // Clear out any whitespace
+            whitespace_and_comments_opt(input)?;
+            // Parse the inner type
+
+            let value = alt((
+                scalar_type.map(VectorItemType::Scalar),
+                literal("string").map(|_| VectorItemType::String),
+                resolved_ident(state, DeclType::ANY).map(VectorItemType::Named),
+            ))
             .parse_next(input)?;
 
-        Ok(Array { item_type, length })
-    })
-    .parse_next(input)
+            // let value = resolved_ident(state, DeclType::ANY).parse_next(input)?;
+
+            whitespace_and_comments_opt(input)?;
+            // Try to consume a closing square bracket
+            literal("]")
+                .context(StrContext::Label("vector"))
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "closing bracket",
+                )))
+                .parse_next(input)?;
+
+            Ok(value)
+        })
+        .parse_next(input)
+    }
 }
 
-pub fn struct_field_type<'s>(input: &mut &'s str) -> PResult<StructFieldType<'s>> {
-    trace("struct_field_type", |input: &mut _| {
-        whitespace_and_comments_opt(input)?;
-        // Parse as vector
-        let val = if input.starts_with('[') {
-            let array = array_type.parse_next(input)?;
+pub fn table_field_type<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, TableFieldType<'s>, ContextError> + 'a {
+    |input: &mut _| {
+        trace("table_field_type", |i: &mut _| {
+            whitespace_and_comments_opt(i)?;
+            // Parse as vector
+            let val = if i.starts_with('[') {
+                let ident = vector_type(state).parse_next(i)?;
 
-            StructFieldType::Array(array)
-        } else {
-            let ident = namespaced_ident.parse_next(input)?;
-
-            if let Some(scalar) = ScalarType::parse(ident) {
-                StructFieldType::Scalar(scalar)
+                TableFieldType::Vector(ident)
             } else {
-                StructFieldType::Struct(ident)
-            }
-        };
+                alt((
+                    scalar_type.map(TableFieldType::Scalar),
+                    literal("string").map(|_| TableFieldType::String),
+                    resolved_ident(state, DeclType::ANY).map(TableFieldType::Named),
+                ))
+                .parse_next(i)?
+            };
 
-        Ok(val)
-    })
-    .parse_next(input)
-}
-
-pub fn vector_type<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::Slice> {
-    trace("vector_type", |input: &mut _| {
-        whitespace_and_comments_opt(input)?;
-        // Try to consume an opening square bracket
-        literal("[").parse_next(input)?;
-        // Clear out any whitespace
-        whitespace_and_comments_opt(input)?;
-        // Parse the inner type
-        let value = namespaced_ident.parse_next(input)?;
-
-        whitespace_and_comments_opt(input)?;
-        // Try to consume a closing square bracket
-        literal("]")
-            .context(StrContext::Label("vector"))
-            .context(StrContext::Expected(StrContextValue::Description(
-                "closing bracket",
-            )))
-            .parse_next(input)?;
-
-        Ok(value)
-    })
-    .parse_next(input)
-}
-
-pub fn table_field_type<'s>(input: &mut &'s str) -> PResult<TableFieldType<'s>> {
-    trace("table_field_type", |i: &mut _| {
-        whitespace_and_comments_opt(i)?;
-        // Parse as vector
-        let val = if i.starts_with('[') {
-            let ident = vector_type.parse_next(i)?;
-
-            if ident == "string" {
-                TableFieldType::Vector(VectorItemType::String)
-            } else if let Some(scalar) = ScalarType::parse(ident) {
-                TableFieldType::Vector(VectorItemType::Scalar(scalar))
-            } else {
-                TableFieldType::Vector(VectorItemType::Named(ident))
-            }
-        } else {
-            let ident = namespaced_ident.parse_next(i)?;
-
-            if ident == "string" {
-                TableFieldType::String
-            } else if let Some(scalar) = ScalarType::parse(ident) {
-                TableFieldType::Scalar(scalar)
-            } else {
-                TableFieldType::Named(ident)
-            }
-        };
-
-        Ok(val)
-    })
-    .parse_next(input)
+            Ok(val)
+        })
+        .parse_next(input)
+    }
 }
 
 pub fn scalar_type(input: &mut &str) -> PResult<ScalarType> {
@@ -299,6 +332,10 @@ pub fn scalar_type(input: &mut &str) -> PResult<ScalarType> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use crate::parser::TypeDecls;
+
     use super::*;
 
     #[test]
@@ -325,28 +362,61 @@ mod tests {
 
     #[test]
     fn vector_wrapped() {
+        let mut state = ParserState::new();
+
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_structs(["foo"]);
+
+        let decls = HashMap::from([
+            ("", foo_decl.clone()),
+            ("namespace", foo_decl.clone()),
+            ("one.two.three", foo_decl.clone()),
+        ]);
+
+        state.extend_decls(decls);
+
         let valid = [
-            ("[uint32]", "uint32"),
-            ("[hello]", "hello"),
-            ("[ type]", "type"),
-            ("[test ]", "test"),
+            ("[uint32]", VectorItemType::Scalar(ScalarType::UInt32)),
+            ("[foo]", VectorItemType::Named("foo")),
+            ("[ namespace.foo]", VectorItemType::Named("namespace.foo")),
+            ("[float32 ]", VectorItemType::Scalar(ScalarType::Float32)),
         ];
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(vector_type.parse_next(&mut value), Ok(item));
+            assert_eq!(vector_type(&state).parse_next(&mut value), Ok(item));
         }
 
-        let invalid = ["uint32", "[uint32", "uint32]", "[uint32 asd]", "a  c"];
+        let invalid = [
+            "uint32",
+            "[uint32",
+            "uint32]",
+            "[uint32 asd]",
+            "a  c",
+            "[invalid_type]",
+        ];
 
         for item in invalid {
             let mut value = item;
-            assert!(vector_type.parse_next(&mut value).is_err());
+            assert!(vector_type(&state).parse_next(&mut value).is_err());
         }
     }
 
     #[test]
     fn table_field_type_() {
+        let mut state = ParserState::new();
+
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_structs(["foo"]);
+
+        let decls = HashMap::from([
+            ("", foo_decl.clone()),
+            ("namespace", foo_decl.clone()),
+            ("one.two.three", foo_decl.clone()),
+        ]);
+
+        state.extend_decls(decls);
+
         let valid = [
             (
                 "[uint32]",
@@ -357,8 +427,8 @@ mod tests {
                 TableFieldType::Vector(VectorItemType::Scalar(ScalarType::Bool)),
             ),
             (
-                "[ hello]",
-                TableFieldType::Vector(VectorItemType::Named("hello")),
+                "[ foo]",
+                TableFieldType::Vector(VectorItemType::Named("foo")),
             ),
             (
                 "[double ]",
@@ -366,24 +436,38 @@ mod tests {
             ),
             ("double", TableFieldType::Scalar(ScalarType::Float64)),
             ("string", TableFieldType::String),
-            ("hello", TableFieldType::Named("hello")),
+            ("namespace.foo", TableFieldType::Named("namespace.foo")),
         ];
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(table_field_type.parse_next(&mut value), Ok(item));
+            assert_eq!(table_field_type(&state).parse_next(&mut value), Ok(item));
         }
 
-        let invalid = ["[uint32", "[uint32 asd]"];
+        let invalid = ["[uint32", "[uint32 asd]", "invalid_type"];
 
         for item in invalid {
             let mut value = item;
-            assert!(table_field_type.parse_next(&mut value).is_err());
+            assert!(table_field_type(&state).parse_next(&mut value).is_err());
         }
     }
 
     #[test]
     fn array() {
+        let mut state = ParserState::new();
+
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_structs(["foo"]);
+        foo_decl.add_tables(["bar"]);
+
+        let decls = HashMap::from([
+            ("", foo_decl.clone()),
+            ("namespace", foo_decl.clone()),
+            ("one.two.three", foo_decl.clone()),
+        ]);
+
+        state.extend_decls(decls);
+
         let valid = [
             (
                 "[uint32:5]",
@@ -400,9 +484,9 @@ mod tests {
                 },
             ),
             (
-                "[ hello :\n1500000 ]",
+                "[ namespace.foo :\n1500000 ]",
                 Array {
-                    item_type: ArrayItemType::Named("hello"),
+                    item_type: ArrayItemType::Named("namespace.foo"),
                     length: 1_500_000,
                 },
             ),
@@ -410,19 +494,33 @@ mod tests {
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(array_type.parse_next(&mut value), Ok(item));
+            assert_eq!(array_type(&state).parse_next(&mut value), Ok(item));
         }
 
-        let invalid = ["[uint32]", "[uint32:5", "[hello 5]", "uint32:5]"];
+        let invalid = ["[uint32]", "[uint32:5", "[hello 5]", "uint32:5]", "[bar:3]"];
 
         for item in invalid {
             let mut value = item;
-            assert!(array_type.parse_next(&mut value).is_err());
+            assert!(array_type(&state).parse_next(&mut value).is_err());
         }
     }
 
     #[test]
     fn struct_field_type_() {
+        let mut state = ParserState::new();
+
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_structs(["foo"]);
+        foo_decl.add_tables(["bar"]);
+
+        let decls = HashMap::from([
+            ("", foo_decl.clone()),
+            ("namespace", foo_decl.clone()),
+            ("one.two.three", foo_decl.clone()),
+        ]);
+
+        state.extend_decls(decls);
+
         let valid = [
             (
                 "[uint32\n: \n 5]",
@@ -432,19 +530,19 @@ mod tests {
                 }),
             ),
             ("float", StructFieldType::Scalar(ScalarType::Float32)),
-            ("hello", StructFieldType::Struct("hello")),
+            ("namespace.foo", StructFieldType::Named("namespace.foo")),
         ];
 
         for (item_str, item) in valid {
             let mut value = item_str;
-            assert_eq!(struct_field_type.parse_next(&mut value), Ok(item));
+            assert_eq!(struct_field_type(&state).parse_next(&mut value), Ok(item));
         }
 
-        let invalid = ["[uint32]", "[uint32:5"];
+        let invalid = ["[uint32]", "[uint32:5", "bar"];
 
         for item in invalid {
             let mut value = item;
-            assert!(struct_field_type.parse_next(&mut value).is_err());
+            assert!(struct_field_type(&state).parse_next(&mut value).is_err());
         }
     }
 }

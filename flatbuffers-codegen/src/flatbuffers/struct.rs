@@ -51,7 +51,7 @@ fn struct_field<'a, 's: 'a>(
 
             whitespace_and_comments_opt(input)?;
             // Consume the opening bracket
-            let field_type = struct_field_type.parse_next(input)?;
+            let field_type = struct_field_type(state).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
@@ -124,7 +124,12 @@ pub fn struct_item<'a, 's: 'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::flatbuffers::primitives::{Array, ArrayItemType, ScalarType};
+    use std::collections::HashMap;
+
+    use crate::{
+        flatbuffers::primitives::{Array, ArrayItemType, ScalarType},
+        parser::TypeDecls,
+    };
 
     use super::*;
 
@@ -200,7 +205,11 @@ mod tests {
 
         let valid = [(struct1_str, struct1), (struct2_str, struct2)];
 
-        let state = ParserState::new();
+        let mut state = ParserState::new();
+        let mut decl = TypeDecls::new();
+        decl.add_structs(["Struct2"]);
+
+        state.extend_decls(HashMap::from([("", decl)]));
 
         for (item_str, item) in valid {
             let value = item_str;
