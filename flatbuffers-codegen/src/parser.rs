@@ -4,12 +4,15 @@ use std::{
 };
 
 use winnow::{
-    combinator::{repeat, trace},
-    Parser,
+    combinator::{alt, repeat, rest, trace},
+    error::ContextError,
+    token::take_until,
+    PResult, Parser,
 };
 
-use crate::flatbuffers::item::{item, Item};
+use crate::flatbuffers::item::{item, namespace, Item};
 
+#[derive(Debug)]
 pub struct ParserState<'a> {
     cur_namespace: RefCell<&'a str>,
     namespace_decls: HashMap<&'a str, TypeDecls<'a>>,
@@ -30,8 +33,29 @@ impl<'a> ParserState<'a> {
     pub fn set_namespace(&self, namespace: &'a str) {
         *self.cur_namespace.borrow_mut() = namespace;
     }
+
+    pub fn extend_decls(&mut self, decls: HashMap<&'a str, TypeDecls<'a>>) {
+        for (ns, decls) in decls {
+            self.namespace_decls
+                .entry(ns)
+                .and_modify(|existing| {
+                    existing.enums.extend(&decls.enums);
+                    existing.structs.extend(&decls.structs);
+                    existing.tables.extend(&decls.tables);
+                    existing.unions.extend(&decls.unions);
+                })
+                .or_insert(decls);
+        }
+    }
 }
 
+impl<'a> Default for ParserState<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct TypeDecls<'a> {
     structs: HashSet<&'a str>,
     enums: HashSet<&'a str>,
@@ -45,10 +69,14 @@ pub struct Schema<'a> {
 }
 
 pub fn collect_type_decls<'a>(file: &'a str, ty: &'static str) -> Vec<&'a str> {
-    let pat = regex::Regex::new(&format!(r#"^[ \t]*{ty}[ \t\n\r]+([\w\.]+)"#)).unwrap();
+    let pat = format!(r#"(?:[\n\r]+|^)[ \t]*{ty}[ \t\n\r]+([\w]+)"#);
+    let pat = regex::Regex::new(&pat).unwrap();
 
     pat.captures_iter(file)
-        .flat_map(|val| val.iter().skip(1).collect::<Vec<_>>())
+        .flat_map(|val| {
+            println!("capture: {val:?}");
+            val.iter().skip(1).collect::<Vec<_>>()
+        })
         .filter_map(|val| val.map(|x| x.as_str()))
         .collect()
 }
@@ -69,4 +97,41 @@ pub fn parse_file<'a>(file: &'a str, state: &ParserState<'a>) -> anyhow::Result<
     trace("parse_file", repeat(0.., item(state)))
         .parse(file)
         .map_err(|e| anyhow::format_err!("{e}"))
+}
+
+pub fn get_namespaced_decls(file: &str) -> PResult<HashMap<&str, TypeDecls<'_>>> {
+    let mut file = file;
+
+    let input = &mut file;
+
+    let mut map = HashMap::new();
+
+    let state = ParserState::new();
+
+    while !input.is_empty() {
+        let pre_namespace_text = alt((take_until(0.., "namespace"), rest)).parse_next(input)?;
+
+        println!("pre_namespace_text:\n===");
+        println!("{pre_namespace_text}");
+        println!("===");
+
+        let structs = collect_type_decls(pre_namespace_text, "struct");
+        let enums = collect_type_decls(pre_namespace_text, "enum");
+        let tables = collect_type_decls(pre_namespace_text, "table");
+        println!("tables: {tables:?}");
+        let unions = collect_type_decls(pre_namespace_text, "union");
+
+        let ns_entry: &mut TypeDecls = map.entry(state.namespace()).or_default();
+
+        ns_entry.structs.extend(structs);
+        ns_entry.enums.extend(enums);
+        ns_entry.tables.extend(tables);
+        ns_entry.unions.extend(unions);
+
+        if !input.is_empty() {
+            namespace(&state).parse_next(input)?;
+        }
+    }
+
+    Ok(map)
 }

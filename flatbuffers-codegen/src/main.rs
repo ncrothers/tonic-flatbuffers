@@ -1,4 +1,6 @@
-use flatbuffers_codegen::parser::{parse_file, ParserState};
+use flatbuffers_codegen::parser::{
+    collect_includes, get_namespaced_decls, parse_file, ParserState,
+};
 
 fn main() {
     let input = r#"
@@ -13,9 +15,16 @@ fn main() {
 
     let file = std::fs::read_to_string("../examples/helloworld/fbs/service2.fbs").unwrap();
 
-    let state = ParserState::new();
+    let namespaced_decls = get_namespaced_decls(&file).unwrap();
+
+    let mut state = ParserState::new();
+    state.extend_decls(namespaced_decls);
+
     let items = parse_file(&file, &state).unwrap();
 
     println!("Items found:");
     println!("{items:#?}");
+
+    println!("State:");
+    println!("{state:#?}");
 }
