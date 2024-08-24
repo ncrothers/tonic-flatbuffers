@@ -11,6 +11,7 @@ use winnow::{
 
 use crate::flatbuffers::item::{item, namespace, Item};
 
+#[derive(Debug, PartialEq)]
 pub enum DeclType {
     Enum,
     Struct,
@@ -20,6 +21,18 @@ pub enum DeclType {
 
 impl DeclType {
     pub const ANY: &'static [Self] = &[Self::Enum, Self::Struct, Self::Table, Self::Union];
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NamedType<'a> {
+    pub ident: &'a str,
+    pub decl_type: DeclType,
+}
+
+impl<'a> NamedType<'a> {
+    pub fn new(ident: &'a str, decl_type: DeclType) -> Self {
+        Self { ident, decl_type }
+    }
 }
 
 #[derive(Debug)]
@@ -58,27 +71,43 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    fn resolve_ident_recursive(&self, ns: &str, ident: &str, decl_types: &[DeclType]) -> bool {
+    fn resolve_ident_recursive(
+        &self,
+        ns: &str,
+        ident: &str,
+        decl_types: &[DeclType],
+    ) -> Option<DeclType> {
         // Try to match namespace
         if let Some(decls) = self.namespace_decls.get(ns) {
             // Try to match against all the provided types
             for ty in decl_types {
-                let resolved = match ty {
-                    DeclType::Enum => decls.enums.contains(ident),
-                    DeclType::Struct => decls.structs.contains(ident),
-                    DeclType::Table => decls.tables.contains(ident),
-                    DeclType::Union => decls.unions.contains(ident),
+                match ty {
+                    DeclType::Enum => {
+                        if decls.enums.contains(ident) {
+                            return Some(DeclType::Enum);
+                        }
+                    }
+                    DeclType::Struct => {
+                        if decls.structs.contains(ident) {
+                            return Some(DeclType::Struct);
+                        }
+                    }
+                    DeclType::Table => {
+                        if decls.tables.contains(ident) {
+                            return Some(DeclType::Table);
+                        }
+                    }
+                    DeclType::Union => {
+                        if decls.unions.contains(ident) {
+                            return Some(DeclType::Union);
+                        }
+                    }
                 };
-
-                // Only return if true and there's more to check. If false, we want to continue recursing
-                if resolved {
-                    return true;
-                }
             }
 
             // When no namespace left to check, we can return
             if !ns.is_empty() {
-                return false;
+                return None;
             }
         }
 
@@ -86,30 +115,30 @@ impl<'a> ParserState<'a> {
         if let Some((ns, ident)) = ident.rsplit_once('.') {
             self.resolve_ident_recursive(ns, ident, decl_types)
         } else {
-            false
+            None
         }
     }
 
-    pub fn resolve_any(&self, ident: &str, ty: &[DeclType]) -> bool {
+    pub fn resolve_any(&self, ident: &str, ty: &[DeclType]) -> Option<DeclType> {
         let (ns, ident) = ident.rsplit_once('.').unwrap_or(("", ident));
 
         self.resolve_ident_recursive(ns, ident, ty)
     }
 
     pub fn resolve_enum(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Enum])
+        self.resolve_any(ident, &[DeclType::Enum]).is_some()
     }
 
     pub fn resolve_struct(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Struct])
+        self.resolve_any(ident, &[DeclType::Struct]).is_some()
     }
 
     pub fn resolve_table(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Table])
+        self.resolve_any(ident, &[DeclType::Table]).is_some()
     }
 
     pub fn resolve_union(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Union])
+        self.resolve_any(ident, &[DeclType::Union]).is_some()
     }
 }
 

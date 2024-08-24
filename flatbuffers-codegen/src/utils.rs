@@ -11,7 +11,7 @@ use winnow::{
 
 use crate::{
     flatbuffers::primitives::{DefaultValue, ScalarType, TableFieldType},
-    parser::{DeclType, ParserState},
+    parser::{DeclType, NamedType, ParserState},
 };
 
 macro_rules! impl_typename {
@@ -123,19 +123,16 @@ pub fn default_value<'a, 's>(
 
                     Ok(DefaultValue::Vector)
                 }
-                _ => Err(ErrMode::Cut(
-                    ContextError::new()
-                        .add_context(input, &checkpoint, StrContext::Label("default value"))
-                        .add_context(
-                            input,
-                            &checkpoint,
-                            StrContext::Expected(StrContextValue::Description(
-                                "default values for this type are not supported",
-                            )),
-                        ),
-                )),
+                _ => Err(ErrMode::Cut(ContextError::new().add_context(
+                    input,
+                    &checkpoint,
+                    StrContext::Label(
+                        "default value; default values for this type are not supported",
+                    ),
+                ))),
             }
         })
+        .context(StrContext::Label("default value"))
         .parse_next(input)
     }
 }
@@ -144,29 +141,25 @@ pub fn default_value<'a, 's>(
 pub fn resolved_ident<'a, 's: 'a>(
     state: &'a ParserState<'s>,
     decl_types: &'a [DeclType],
-) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
+) -> impl Parser<&'s str, NamedType<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("resolved_ident", |input: &mut _| {
             whitespace_all(input)?;
-            let checkpoint = input.checkpoint();
-            let ident = cut_err(
-                separated(1.., ident, ".")
-                    .map(|()| ())
-                    .take()
-                    .verify(|ident| {
-                        // Try the ident literally, then prepend the cur_namespace
-                        if !(state.resolve_any(ident, decl_types)
-                            || state.resolve_any(
+
+            let ident = cut_err(separated(1.., ident, ".").map(|()| ()).take().verify_map(
+                |ident| {
+                    // Try the ident literally, then prepend the cur_namespace
+                    state
+                        .resolve_any(ident, decl_types)
+                        .or_else(|| {
+                            state.resolve_any(
                                 &format!("{}.{}", state.namespace(), ident),
                                 decl_types,
-                            ))
-                        {
-                            false
-                        } else {
-                            true
-                        }
-                    }),
-            )
+                            )
+                        })
+                        .map(|decl_type| NamedType { ident, decl_type })
+                },
+            ))
             .context(StrContext::Label("type"))
             .context(StrContext::Expected(StrContextValue::Description(
                 "valid type, could not be found",
@@ -323,7 +316,13 @@ mod tests {
         let valid = ["foo", "namespace.foo", "one.two.three.foo"];
 
         for item in valid {
-            assert_eq!(resolved_ident(&state, DeclType::ANY).parse(item), Ok(item));
+            assert_eq!(
+                resolved_ident(&state, DeclType::ANY).parse(item),
+                Ok(NamedType {
+                    ident: item,
+                    decl_type: DeclType::Struct
+                })
+            );
         }
 
         let invalid = [".foo", "hello.", "test.test."];

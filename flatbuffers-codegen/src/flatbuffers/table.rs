@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use winnow::{
     combinator::{cut_err, opt, preceded, repeat, trace},
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
@@ -7,22 +9,33 @@ use winnow::{
 };
 
 use crate::{
-    parser::ParserState,
+    parser::{DeclType, NamedType, ParserState},
     utils::{default_value, ident, whitespace_all, whitespace_and_comments_opt},
 };
 
 use super::{
-    attributes::{attribute_list, Attribute, AttributeTarget},
+    attributes::{attribute_list, Attribute, AttributeTarget, AttributesWrapper, StrCheckpoint},
     primitives::{table_field_type, DefaultValue, TableFieldType},
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct TableField<'a> {
     name: &'a str,
     field_type: TableFieldType<'a>,
     default: Option<DefaultValue<'a>>,
     comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    attributes: Option<AttributesWrapper<'a>>,
+    attr_start: Option<StrCheckpoint<'a>>,
+}
+
+impl<'a> PartialEq for TableField<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.field_type == other.field_type
+            && self.default == other.default
+            && self.comments == other.comments
+            && self.attributes == other.attributes
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -55,21 +68,18 @@ fn table_field<'a, 's: 'a>(
 
             // If the next token is =, require a default
             let default = if input.starts_with('=') {
-                Some(
-                    cut_err(preceded("=", default_value(&field_type)))
-                        .context(StrContext::Label("default value for field type"))
-                        .parse_next(input)?,
-                )
+                Some(cut_err(preceded("=", default_value(&field_type))).parse_next(input)?)
             } else {
                 None
             };
 
             whitespace_and_comments_opt(input)?;
 
+            let attrs_start = input.checkpoint();
+
             let attrs = if input.starts_with('(') {
                 Some(
-                    attribute_list(state, AttributeTarget::TableField, require_id)
-                        .parse_next(input)?,
+                    attribute_list(state, AttributeTarget::TableField).parse_next(input)?, //.map(|attrs| attrs.attrs)?,
                 )
             } else {
                 let checkpoint = input.checkpoint();
@@ -96,7 +106,8 @@ fn table_field<'a, 's: 'a>(
                 field_type,
                 default,
                 comments,
-                attributes: attrs.unwrap_or_default(),
+                attributes: attrs,
+                attr_start: Some(attrs_start),
             })
         })
         .parse_next(input)
@@ -119,8 +130,9 @@ pub fn table_item<'a, 's: 'a>(
             // Get the table ident
             let ident = cut_err(ident).parse_next(input)?;
 
-            let attrs = opt(attribute_list(state, AttributeTarget::TableItem, &mut None))
-                .parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::TableItem))
+                .parse_next(input)?
+                .map(|attrs| attrs.attrs);
 
             whitespace_and_comments_opt(input)?;
             // Consume the opening bracket
@@ -135,10 +147,121 @@ pub fn table_item<'a, 's: 'a>(
             let mut require_id = None;
 
             // Consume as many table fields as possible
-            let fields = repeat(0.., table_field(state, &mut require_id)).parse_next(input)?;
+            let fields: Vec<_> =
+                repeat(0.., table_field(state, &mut require_id)).parse_next(input)?;
             // while let Some(field) = opt(table_field(state, &mut require_id)).parse_next(input)? {
             //     fields.push(field);
             // }
+
+            // Validate the ID attributes
+            let n_fields = fields.len() as u64;
+            if n_fields > 0 {
+                macro_rules! err {
+                    ($chk:expr) => {
+                        input.reset($chk);
+                        return Err(ErrMode::Cut(ContextError::new().add_context(input, $chk, StrContext::Label("id; ids must start at 0 and increase continuously"))));
+                    };
+                    ($chk:expr, $msg:expr) => {
+                        input.reset($chk);
+                        return Err(ErrMode::Cut(ContextError::new().add_context(input, $chk, StrContext::Label($msg))));
+                    };
+                }
+                // let mut err = |chk: &'s StrCheckpoint| {
+
+                // };
+
+                let has_ids = fields
+                    .iter()
+                    .find_map(|field| {
+                        field
+                            .attributes
+                            .as_ref()
+                            .map(|attrs| {
+                                attrs
+                                    .attrs
+                                    .iter()
+                                    .find_map(|attr| if matches!(attr, Attribute::Id(_)) {
+                                        Some(true)
+                                    } else {
+                                        None
+                                    })
+                        })
+                        .unwrap_or(Some(false))
+                    }).unwrap_or(false);
+
+                if has_ids {
+                    let mut i = 0;
+
+                    'index: for n in 0..n_fields {
+                        let mut smallest = u64::MAX;
+                        let mut smallest_chk = &input.checkpoint();
+                        let mut id_set = HashSet::new();
+
+                        // Find the next index from the fields
+                        for field in &fields {
+                            // Check the attributes
+                            if let Some(attrs) = &field.attributes {
+                                let mut has_id = false;
+                                // Check each attribute
+                                for (attr, chk) in attrs.attrs.iter().zip(attrs.attr_chks.iter()) {
+                                    // If this is the ID, check if it matches
+                                    if let Attribute::Id(field_id) = attr {
+                                        has_id = true;
+                                        // A union takes up 2 spots, so its index should be i+1
+                                        if matches!(field.field_type, TableFieldType::Named(NamedType { ident: _, decl_type: DeclType::Union })) {
+                                            if *field_id == 0 {
+                                                err!(chk, "id; union ids can only be 1 at the lowest");
+                                            }
+
+                                            // Check for overlap in IDs
+                                            if id_set.contains(field_id) || id_set.contains(&(field_id-1)) {
+                                                err!(chk, "id; id value was set twice");
+                                            } else {
+                                                id_set.insert(*field_id);
+                                                id_set.insert(*field_id - 1);
+                                            }
+
+                                            println!("i: {i}, field_id:{field_id}");
+                                            if *field_id == i+1 {
+                                                i += 2;
+                                                continue 'index;
+                                            }
+                                            // If it's equal to what it would be if not a union, error out and notify the user
+                                            else if *field_id == i {
+                                                err!(chk, "id; unions use 2 entries, so the union id must skip one value");
+                                            }
+                                        } else {
+                                            // Check for overlap in IDs
+                                            if id_set.contains(field_id) {
+                                                err!(chk, "id; id value was set twice");
+                                            } else {
+                                                id_set.insert(*field_id);
+                                            }
+
+                                            if *field_id == i {
+                                                i += 1;
+                                                continue 'index;
+                                            } else if *field_id <= smallest && *field_id >= n {
+                                                smallest = *field_id;
+                                                smallest_chk = chk;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if !has_id {
+                                    err!(&field.attr_start.unwrap(), "attribute; when using the id attribute, all fields must have it");
+                                }
+                            } else {
+                                // If there are no attributes, that means there's an error
+                                err!(&field.attr_start.unwrap(), "attribute; when using the id attribute, all fields must have it");
+                            }
+                        }
+
+                        err!(smallest_chk);
+                    }
+                }
+            }
 
             whitespace_and_comments_opt(input)?;
             cut_err(literal("}").context(StrContext::Expected(StrContextValue::CharLiteral('}'))))
@@ -182,7 +305,8 @@ mod tests {
                 field_type: TableFieldType::Scalar(ScalarType::UInt32),
                 default: None,
                 comments: Vec::new(),
-                attributes: Vec::new(),
+                attributes: None,
+                attr_start: None,
             }],
             comments: Vec::new(),
             attributes: Vec::new(),
@@ -214,28 +338,41 @@ mod tests {
                     field_type: TableFieldType::Vector(VectorItemType::Scalar(ScalarType::Int32)),
                     default: None,
                     comments: vec!["This is field documentation"],
-                    attributes: Vec::new(),
+                    attributes: None,
+                    attr_start: None,
                 },
                 TableField {
                     name: "bar",
                     field_type: TableFieldType::Scalar(ScalarType::Float32),
                     default: Some(DefaultValue::Float32(-1.0e-6)),
                     comments: Vec::new(),
-                    attributes: vec![Attribute::Deprecated],
+                    attributes: Some(AttributesWrapper {
+                        attrs: vec![Attribute::Deprecated],
+                        ..Default::default()
+                    }),
+                    attr_start: None,
                 },
                 TableField {
                     name: "another",
-                    field_type: TableFieldType::Vector(VectorItemType::Named("Struct2")),
+                    field_type: TableFieldType::Vector(VectorItemType::Named(NamedType::new(
+                        "Struct2",
+                        DeclType::Struct,
+                    ))),
                     default: None,
                     comments: vec!["Another comment"],
-                    attributes: Vec::new(),
+                    attributes: None,
+                    attr_start: None,
                 },
                 TableField {
                     name: "enum_field",
-                    field_type: TableFieldType::Vector(VectorItemType::Named("TestEnum")),
+                    field_type: TableFieldType::Vector(VectorItemType::Named(NamedType::new(
+                        "TestEnum",
+                        DeclType::Enum,
+                    ))),
                     default: Some(DefaultValue::Vector),
                     comments: Vec::new(),
-                    attributes: Vec::new(),
+                    attributes: None,
+                    attr_start: None,
                 },
             ],
             comments: vec!["This is a comment!"],

@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+
 use winnow::{
     ascii::digit1,
     combinator::{cut_err, not, opt, separated, trace},
-    error::{AddContext, ContextError, ErrMode, InputError, StrContext, StrContextValue},
+    error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     seq,
-    stream::{AsChar, Stream},
+    stream::{AsChar, Checkpoint, Stream},
     token::{literal, take_till},
     Parser,
 };
@@ -23,6 +25,21 @@ pub enum AttributeTarget {
     TableField,
     UnionItem,
     UnionVariant,
+}
+
+pub type StrCheckpoint<'a> = Checkpoint<&'a str, &'a str>;
+
+#[derive(Debug, Default)]
+pub struct AttributesWrapper<'a> {
+    pub attrs: Vec<Attribute<'a>>,
+    pub attr_chks: Vec<StrCheckpoint<'a>>,
+    pub id: Option<StrCheckpoint<'a>>,
+}
+
+impl<'a> PartialEq for AttributesWrapper<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.attrs == other.attrs
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -60,6 +77,22 @@ impl<'a> Attribute<'a> {
                 name: custom,
                 value: None,
             },
+        }
+    }
+
+    pub fn to_ident(&self) -> &'a str {
+        match self {
+            Attribute::BitFlags => "bit_flags",
+            Attribute::Deprecated => "deprecated",
+            Attribute::FlexBuffer => "flexbuffer",
+            Attribute::ForceAlign(_) => "force_align",
+            Attribute::Hash(_) => "hash",
+            Attribute::Id(_) => "id",
+            Attribute::Key => "key",
+            Attribute::NestedFlatBuffer(_) => "nested_flatbuffer",
+            Attribute::OriginalOrder => "original_order",
+            Attribute::Required => "required",
+            Attribute::Custom { name, .. } => name,
         }
     }
 
@@ -139,10 +172,12 @@ impl<'a> Attribute<'a> {
 fn parse_attribute<'a, 's: 'a>(
     _state: &'a ParserState<'s>,
     target: AttributeTarget,
-) -> impl Parser<&'s str, Attribute<'s>, ContextError> + 'a {
+) -> impl Parser<&'s str, (Attribute<'s>, StrCheckpoint<'s>), ContextError> + 'a {
     move |input: &mut _| {
         trace("attribute", |input: &mut _| {
             whitespace_and_comments_opt(input)?;
+            let attr_start = input.checkpoint();
+            println!("Checkpoint: {:?}", attr_start);
             // Get the attribute ident
             let mut attr = cut_err(
                 ident
@@ -162,8 +197,6 @@ fn parse_attribute<'a, 's: 'a>(
 
             // Consume any whitespace and/or newlines
             whitespace_and_comments_opt(input)?;
-
-            let without_value = input.checkpoint();
 
             if attr.has_value() && !attr.is_custom() {
                 cut_err(literal(':')).parse_next(input)?;
@@ -206,29 +239,7 @@ fn parse_attribute<'a, 's: 'a>(
                 input.reset(&checkpoint);
             }
 
-            // // If there's a value for the attribute, parse that as well
-            // if literal::<_, _, InputError<_>>(":")
-            //     .verify(|_| )
-            //     .parse_next(input)
-            //     .is_ok()
-            // {
-            //     if attr.has_value() {
-
-            //     } else {
-            //         let err = ContextError::new()
-            //             .add_context(input, &without_value, StrContext::Label("attribute"))
-            //             .add_context(
-            //                 input,
-            //                 &without_value,
-            //                 StrContext::Expected(StrContextValue::Description(
-            //                     "no value for this attribute type",
-            //                 )),
-            //             );
-            //         return Err(ErrMode::Backtrack(err));
-            //     }
-            // }
-
-            Ok(attr)
+            Ok((attr, attr_start))
         })
         .parse_next(input)
     }
@@ -237,8 +248,7 @@ fn parse_attribute<'a, 's: 'a>(
 pub fn attribute_list<'a, 's: 'a>(
     state: &'a ParserState<'s>,
     target: AttributeTarget,
-    require_id: &'a mut Option<bool>,
-) -> impl Parser<&'s str, Vec<Attribute<'s>>, ContextError> + 'a {
+) -> impl Parser<&'s str, AttributesWrapper<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("attribute_list", |input: &mut _| {
             whitespace_and_comments_opt(input)?;
@@ -246,23 +256,26 @@ pub fn attribute_list<'a, 's: 'a>(
 
             let attrs = cut_err(
                 separated(1.., parse_attribute(state, target), ",")
-                    .verify(|attrs: &Vec<_>| {
-                        for attr in attrs.iter() {
+                    .context(StrContext::Expected(StrContextValue::Description(
+                        "at least one attribute",
+                    )))
+                    .map(|attrs: Vec<_>| {
+                        let mut id = None;
+
+                        for (attr, chk) in attrs.iter() {
                             if matches!(attr, Attribute::Id(_)) {
-                                if let Some(is_required) = &require_id {
-                                    return *is_required;
-                                } else {
-                                    *require_id = Some(true);
-                                    return true;
-                                }
+                                id = Some(*chk);
+                                break;
                             }
                         }
 
-                        if let Some(is_required) = &require_id {
-                            !*is_required
-                        } else {
-                            *require_id = Some(false);
-                            true
+                        let attr_chks = attrs.iter().map(|(_, chk)| *chk).collect();
+                        let attrs = attrs.into_iter().map(|(attr, _)| attr).collect();
+
+                        AttributesWrapper {
+                            attrs,
+                            attr_chks,
+                            id,
                         }
                     })
                     .context(StrContext::Label(
@@ -270,6 +283,23 @@ pub fn attribute_list<'a, 's: 'a>(
                     )),
             )
             .parse_next(input)?;
+
+            // Check for duplicate attributes
+            let mut attr_idents = HashSet::new();
+            for (attr, chk) in attrs.attrs.iter().zip(attrs.attr_chks.iter()) {
+                let ident = attr.to_ident();
+
+                if attr_idents.contains(&ident) {
+                    input.reset(chk);
+                    return Err(ErrMode::Cut(ContextError::new().add_context(
+                        input,
+                        chk,
+                        StrContext::Label("attribute; only one of each attribute is allowed"),
+                    )));
+                } else {
+                    attr_idents.insert(ident);
+                }
+            }
 
             whitespace_and_comments_opt(input)?;
 
@@ -317,7 +347,8 @@ mod tests {
             assert_eq!(
                 parse_attribute(&state, AttributeTarget::TableField)
                     .parse(item_str)
-                    .inspect_err(|e| println!("{e}")),
+                    .inspect_err(|e| println!("{e}"))
+                    .map(|(attr, _)| attr),
                 Ok(item)
             );
         }
@@ -350,8 +381,9 @@ mod tests {
 
         for (item_str, item) in valid {
             assert_eq!(
-                attribute_list(&state, AttributeTarget::TableField, &mut Some(true))
-                    .parse(item_str),
+                attribute_list(&state, AttributeTarget::TableField)
+                    .parse(item_str)
+                    .map(|attrs| attrs.attrs),
                 Ok(item)
             );
         }
@@ -359,8 +391,7 @@ mod tests {
         let invalid = ["id: 1", "(id: 1", "(id:1,)"];
 
         for item in invalid {
-            let attr =
-                attribute_list(&state, AttributeTarget::TableField, &mut Some(true)).parse(item);
+            let attr = attribute_list(&state, AttributeTarget::TableField).parse(item);
             assert!(attr.is_err());
         }
     }

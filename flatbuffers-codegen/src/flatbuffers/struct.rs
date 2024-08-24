@@ -55,12 +55,9 @@ fn struct_field<'a, 's: 'a>(
 
             whitespace_and_comments_opt(input)?;
 
-            let attrs = opt(attribute_list(
-                state,
-                AttributeTarget::StructField,
-                &mut None,
-            ))
-            .parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::StructField))
+                .parse_next(input)?
+                .map(|attrs| attrs.attrs);
 
             whitespace_and_comments_opt(input)?;
 
@@ -91,12 +88,9 @@ pub fn struct_item<'a, 's: 'a>(
             // Get the struct ident
             let ident = ident.parse_next(input)?;
 
-            let attrs = opt(attribute_list(
-                state,
-                AttributeTarget::StructItem,
-                &mut None,
-            ))
-            .parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::StructItem))
+                .parse_next(input)?
+                .map(|attrs| attrs.attrs);
 
             whitespace_and_comments_opt(input)?;
             // Consume the opening bracket
@@ -138,7 +132,7 @@ mod tests {
 
     use crate::{
         flatbuffers::primitives::{Array, ArrayItemType, ScalarType},
-        parser::TypeDecls,
+        parser::{DeclType, NamedType, TypeDecls},
     };
 
     use super::*;
@@ -202,7 +196,10 @@ mod tests {
                 StructField {
                     name: "another",
                     field_type: StructFieldType::Array(Array {
-                        item_type: ArrayItemType::Named("Struct2"),
+                        item_type: ArrayItemType::Named(NamedType::new(
+                            "Struct2",
+                            DeclType::Struct,
+                        )),
                         length: 5,
                     }),
                     comments: Vec::new(),

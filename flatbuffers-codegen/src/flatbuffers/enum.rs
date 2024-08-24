@@ -1,11 +1,10 @@
 use std::str::FromStr;
 
 use winnow::{
-    ascii::digit1,
-    combinator::{opt, separated, trace},
+    combinator::{cut_err, opt, separated, trace},
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::Stream,
-    token::literal,
+    token::{literal, take_while},
     Parser,
 };
 
@@ -81,19 +80,18 @@ where
 
                 whitespace_and_comments_opt(input)?;
 
-                let idx = Parser::parse_to(digit1).parse_next(input)?;
+                let idx =
+                    cut_err(take_while(1.., |c: char| c.is_ascii_digit() || c == '.').parse_to())
+                        .parse_next(input)?;
 
                 Some(idx)
             } else {
                 None
             };
 
-            let attrs = opt(attribute_list(
-                state,
-                AttributeTarget::EnumVariant,
-                &mut None,
-            ))
-            .parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::EnumVariant))
+                .parse_next(input)?
+                .map(|attrs| attrs.attrs);
 
             whitespace_and_comments_opt(input)?;
 
@@ -118,20 +116,21 @@ pub fn enum_item<'a, 's: 'a>(
             literal("enum").parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
-            let ident = ident.parse_next(input)?;
+            let ident = cut_err(ident).parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
-            literal(":")
+            cut_err(literal(":"))
                 .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
                 .parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
             let before_scalar = input.checkpoint();
 
-            let scalar = scalar_type.parse_next(input)?;
+            let scalar = cut_err(scalar_type).parse_next(input)?;
 
             if !scalar.is_integer() {
-                return Err(ErrMode::Backtrack(
+                input.reset(&before_scalar);
+                return Err(ErrMode::Cut(
                     ContextError::new()
                         .add_context(input, &before_scalar, StrContext::Label("enum type"))
                         .add_context(
@@ -142,13 +141,12 @@ pub fn enum_item<'a, 's: 'a>(
                 ));
             }
 
-            let attrs = opt(attribute_list(state, AttributeTarget::EnumItem, &mut None))
-                .parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::EnumItem))
+                .parse_next(input)?
+                .map(|attrs| attrs.attrs);
             whitespace_and_comments_opt(input)?;
 
-            whitespace_and_comments_opt(input)?;
-
-            literal("{")
+            cut_err(literal("{"))
                 .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
                 .parse_next(input)?;
 
@@ -156,7 +154,8 @@ pub fn enum_item<'a, 's: 'a>(
                 state: &'a ParserState<'s>,
             ) -> impl Parser<&'s str, Vec<EnumVariant<'s, T>>, ContextError> + 'a {
                 move |input: &mut _| {
-                    let variants = separated(0.., enum_variant(state), ",").parse_next(input)?;
+                    let variants =
+                        cut_err(separated(0.., enum_variant(state), ",")).parse_next(input)?;
                     // Consume a trailing comma, if present
                     opt(literal(",")).parse_next(input)?;
 
@@ -166,20 +165,68 @@ pub fn enum_item<'a, 's: 'a>(
 
             // Parse variants according to the data type
             let variants = match scalar {
-                ScalarType::Int8 => EnumData::Int8(parse_variants(state).parse_next(input)?),
-                ScalarType::UInt8 => EnumData::UInt8(parse_variants(state).parse_next(input)?),
-                ScalarType::Int16 => EnumData::Int16(parse_variants(state).parse_next(input)?),
-                ScalarType::UInt16 => EnumData::UInt16(parse_variants(state).parse_next(input)?),
-                ScalarType::Int32 => EnumData::Int32(parse_variants(state).parse_next(input)?),
-                ScalarType::UInt32 => EnumData::UInt32(parse_variants(state).parse_next(input)?),
-                ScalarType::Int64 => EnumData::Int64(parse_variants(state).parse_next(input)?),
-                ScalarType::UInt64 => EnumData::UInt64(parse_variants(state).parse_next(input)?),
+                ScalarType::Int8 => EnumData::Int8(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("int8"))),
+                    )
+                    .parse_next(input)?,
+                ),
+                ScalarType::UInt8 => EnumData::UInt8(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("uint8"))),
+                    )
+                    .parse_next(input)?,
+                ),
+                ScalarType::Int16 => EnumData::Int16(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("int16"))),
+                    )
+                    .parse_next(input)?,
+                ),
+                ScalarType::UInt16 => EnumData::UInt16(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("uint16"))),
+                    )
+                    .parse_next(input)?,
+                ),
+                ScalarType::Int32 => EnumData::Int32(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("int32"))),
+                    )
+                    .parse_next(input)?,
+                ),
+                ScalarType::UInt32 => EnumData::UInt32(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("uint32"))),
+                    )
+                    .parse_next(input)?,
+                ),
+                ScalarType::Int64 => EnumData::Int64(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("int64"))),
+                    )
+                    .parse_next(input)?,
+                ),
+                ScalarType::UInt64 => EnumData::UInt64(
+                    cut_err(
+                        parse_variants(state)
+                            .context(StrContext::Expected(StrContextValue::Description("uint64"))),
+                    )
+                    .parse_next(input)?,
+                ),
                 _ => unreachable!(),
             };
 
             whitespace_and_comments_opt(input)?;
 
-            literal("}")
+            cut_err(literal("}"))
                 .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
                 .parse_next(input)?;
 

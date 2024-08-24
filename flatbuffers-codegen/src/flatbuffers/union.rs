@@ -66,16 +66,14 @@ fn union_variant<'a, 's: 'a>(
             // Parse the actual type, must be a table
             let actual_type = resolved_ident(state, &[DeclType::Table])
                 .context(StrContext::Label("union variant type"))
+                .map(|val| val.ident)
                 .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
-            let attrs = opt(attribute_list(
-                state,
-                AttributeTarget::UnionVariant,
-                &mut None,
-            ))
-            .parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::UnionVariant))
+                .parse_next(input)?
+                .map(|attrs| attrs.attrs);
 
             whitespace_and_comments_opt(input)?;
 
@@ -106,8 +104,9 @@ pub fn union_item<'a, 's: 'a>(
 
             let ident = ident.parse_next(input)?;
 
-            let attrs = opt(attribute_list(state, AttributeTarget::UnionItem, &mut None))
-                .parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::UnionItem))
+                .parse_next(input)?
+                .map(|attrs| attrs.attrs);
             whitespace_and_comments_opt(input)?;
 
             literal("{")

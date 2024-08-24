@@ -193,7 +193,9 @@ pub fn root_type<'a, 's: 'a>(
             literal("root_type").parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
-            let namespace = resolved_ident(state, &[DeclType::Table]).parse_next(input)?;
+            let namespace = resolved_ident(state, &[DeclType::Table])
+                .map(|value| value.ident)
+                .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             literal(";").parse_next(input)?;

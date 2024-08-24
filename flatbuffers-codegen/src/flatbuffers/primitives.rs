@@ -8,7 +8,7 @@ use winnow::{
 };
 
 use crate::{
-    parser::{DeclType, ParserState},
+    parser::{DeclType, NamedType, ParserState},
     utils::{ident, resolved_ident, whitespace_and_comments_opt},
 };
 
@@ -20,7 +20,7 @@ pub struct Array<'a> {
 
 #[derive(Debug, PartialEq)]
 pub enum ArrayItemType<'a> {
-    Named(&'a str),
+    Named(NamedType<'a>),
     Scalar(ScalarType),
 }
 
@@ -28,7 +28,7 @@ pub enum ArrayItemType<'a> {
 pub enum TableFieldType<'a> {
     Scalar(ScalarType),
     String,
-    Named(&'a str),
+    Named(NamedType<'a>),
     Vector(VectorItemType<'a>),
 }
 
@@ -37,13 +37,13 @@ pub enum TableFieldType<'a> {
 #[derive(Debug, PartialEq)]
 pub enum StructFieldType<'a> {
     Array(Array<'a>),
-    Named(&'a str),
+    Named(NamedType<'a>),
     Scalar(ScalarType),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum VectorItemType<'a> {
-    Named(&'a str),
+    Named(NamedType<'a>),
     Scalar(ScalarType),
     String,
 }
@@ -377,8 +377,14 @@ mod tests {
 
         let valid = [
             ("[uint32]", VectorItemType::Scalar(ScalarType::UInt32)),
-            ("[foo]", VectorItemType::Named("foo")),
-            ("[ namespace.foo]", VectorItemType::Named("namespace.foo")),
+            (
+                "[foo]",
+                VectorItemType::Named(NamedType::new("foo", DeclType::Struct)),
+            ),
+            (
+                "[ namespace.foo]",
+                VectorItemType::Named(NamedType::new("namespace.foo", DeclType::Struct)),
+            ),
             ("[float32 ]", VectorItemType::Scalar(ScalarType::Float32)),
         ];
 
@@ -428,7 +434,10 @@ mod tests {
             ),
             (
                 "[ foo]",
-                TableFieldType::Vector(VectorItemType::Named("foo")),
+                TableFieldType::Vector(VectorItemType::Named(NamedType::new(
+                    "foo",
+                    DeclType::Struct,
+                ))),
             ),
             (
                 "[double ]",
@@ -436,7 +445,10 @@ mod tests {
             ),
             ("double", TableFieldType::Scalar(ScalarType::Float64)),
             ("string", TableFieldType::String),
-            ("namespace.foo", TableFieldType::Named("namespace.foo")),
+            (
+                "namespace.foo",
+                TableFieldType::Named(NamedType::new("namespace.foo", DeclType::Struct)),
+            ),
         ];
 
         for (item_str, item) in valid {
@@ -486,7 +498,10 @@ mod tests {
             (
                 "[ namespace.foo :\n1500000 ]",
                 Array {
-                    item_type: ArrayItemType::Named("namespace.foo"),
+                    item_type: ArrayItemType::Named(NamedType::new(
+                        "namespace.foo",
+                        DeclType::Struct,
+                    )),
                     length: 1_500_000,
                 },
             ),
@@ -530,7 +545,10 @@ mod tests {
                 }),
             ),
             ("float", StructFieldType::Scalar(ScalarType::Float32)),
-            ("namespace.foo", StructFieldType::Named("namespace.foo")),
+            (
+                "namespace.foo",
+                StructFieldType::Named(NamedType::new("namespace.foo", DeclType::Struct)),
+            ),
         ];
 
         for (item_str, item) in valid {

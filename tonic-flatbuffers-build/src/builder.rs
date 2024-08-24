@@ -375,7 +375,7 @@ impl Builder {
                     let mut file_str = format!(
                         r#"
                         syntax = "proto3";
-    
+
                         package {namespace};
                     "#
                     );
@@ -400,9 +400,9 @@ impl Builder {
                 r#"
     syntax = "proto3";
     {file_includes}
-    
+
     package {file_namespace};
-    
+
     {file_str}
             "#
             );
