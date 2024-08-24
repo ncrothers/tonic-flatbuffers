@@ -221,7 +221,6 @@ pub fn table_item<'a, 's: 'a>(
                                                 id_set.insert(*field_id - 1);
                                             }
 
-                                            println!("i: {i}, field_id:{field_id}");
                                             if *field_id == i+1 {
                                                 i += 2;
                                                 continue 'index;

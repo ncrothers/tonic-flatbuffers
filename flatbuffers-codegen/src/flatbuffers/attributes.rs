@@ -177,7 +177,6 @@ fn parse_attribute<'a, 's: 'a>(
         trace("attribute", |input: &mut _| {
             whitespace_and_comments_opt(input)?;
             let attr_start = input.checkpoint();
-            println!("Checkpoint: {:?}", attr_start);
             // Get the attribute ident
             let mut attr = cut_err(
                 ident
