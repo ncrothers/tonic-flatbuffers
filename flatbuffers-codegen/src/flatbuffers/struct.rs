@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    attributes::{attribute_list, Attribute},
+    attributes::{attribute_list, Attribute, AttributeTarget},
     primitives::{struct_field_type, StructFieldType},
 };
 
@@ -55,7 +55,12 @@ fn struct_field<'a, 's: 'a>(
 
             whitespace_and_comments_opt(input)?;
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = opt(attribute_list(
+                state,
+                AttributeTarget::StructField,
+                &mut None,
+            ))
+            .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
@@ -86,7 +91,12 @@ pub fn struct_item<'a, 's: 'a>(
             // Get the struct ident
             let ident = ident.parse_next(input)?;
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = opt(attribute_list(
+                state,
+                AttributeTarget::StructItem,
+                &mut None,
+            ))
+            .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             // Consume the opening bracket

@@ -46,17 +46,17 @@ pub fn get_include_paths(file: &str, include_paths: &[PathBuf]) -> anyhow::Resul
 }
 
 fn main() {
-    let input = r#"
-        table Test {
-            foo:uint32 = 1;
-            bar:string;
-        }"#;
-    let state = ParserState::new();
+    // let input = r#"
+    //     table Test {
+    //         foo:uint32 = 1;
+    //         bar:string;
+    //     }"#;
+    // let state = ParserState::new();
 
-    let res = parse_file(input, &state).unwrap();
-    println!("{res:?}");
+    // let res = parse_file(input, &state).unwrap();
+    // println!("{res:?}");
 
-    let include_paths = vec![PathBuf::from("../examples/helloworld/fbs2")];
+    let include_paths = vec![PathBuf::from("../examples/helloworld/fbs")];
 
     let files_to_compile = glob::glob("../examples/helloworld/fbs/service2.fbs")
         .unwrap()

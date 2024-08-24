@@ -11,7 +11,7 @@ use crate::{
     utils::{ident, resolved_ident, whitespace_and_comments_opt},
 };
 
-use super::attributes::{attribute_list, Attribute};
+use super::attributes::{attribute_list, Attribute, AttributeTarget};
 
 #[derive(Debug, PartialEq)]
 pub struct UnionVariant<'a> {
@@ -70,7 +70,12 @@ fn union_variant<'a, 's: 'a>(
 
             whitespace_and_comments_opt(input)?;
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = opt(attribute_list(
+                state,
+                AttributeTarget::UnionVariant,
+                &mut None,
+            ))
+            .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
@@ -101,7 +106,8 @@ pub fn union_item<'a, 's: 'a>(
 
             let ident = ident.parse_next(input)?;
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::UnionItem, &mut None))
+                .parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
             literal("{")

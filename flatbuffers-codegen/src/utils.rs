@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use winnow::{
     ascii::till_line_ending,
-    combinator::{repeat, separated, trace},
+    combinator::{cut_err, repeat, separated, trace},
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::{AsChar, Stream},
     token::{literal, one_of, take_till, take_while},
@@ -149,27 +149,29 @@ pub fn resolved_ident<'a, 's: 'a>(
         trace("resolved_ident", |input: &mut _| {
             whitespace_all(input)?;
             let checkpoint = input.checkpoint();
-            let ident = separated(1.., ident, ".")
-                .map(|()| ())
-                .take()
-                .parse_next(input)?;
-
-            // Try the ident literally, then prepend the cur_namespace
-            if !(state.resolve_any(ident, decl_types)
-                || state.resolve_any(&format!("{}.{}", state.namespace(), ident), decl_types))
-            {
-                return Err(ErrMode::Cut(
-                    ContextError::new()
-                        .add_context(input, &checkpoint, StrContext::Label("type"))
-                        .add_context(
-                            input,
-                            &checkpoint,
-                            StrContext::Expected(StrContextValue::Description(
-                                "valid type, could not be found",
-                            )),
-                        ),
-                ));
-            }
+            let ident = cut_err(
+                separated(1.., ident, ".")
+                    .map(|()| ())
+                    .take()
+                    .verify(|ident| {
+                        // Try the ident literally, then prepend the cur_namespace
+                        if !(state.resolve_any(ident, decl_types)
+                            || state.resolve_any(
+                                &format!("{}.{}", state.namespace(), ident),
+                                decl_types,
+                            ))
+                        {
+                            false
+                        } else {
+                            true
+                        }
+                    }),
+            )
+            .context(StrContext::Label("type"))
+            .context(StrContext::Expected(StrContextValue::Description(
+                "valid type, could not be found",
+            )))
+            .parse_next(input)?;
 
             Ok(ident)
         })

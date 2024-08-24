@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    attributes::{attribute_list, Attribute},
+    attributes::{attribute_list, Attribute, AttributeTarget},
     primitives::ScalarType,
 };
 
@@ -88,7 +88,12 @@ where
                 None
             };
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = opt(attribute_list(
+                state,
+                AttributeTarget::EnumVariant,
+                &mut None,
+            ))
+            .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
@@ -137,7 +142,8 @@ pub fn enum_item<'a, 's: 'a>(
                 ));
             }
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::EnumItem, &mut None))
+                .parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
             whitespace_and_comments_opt(input)?;

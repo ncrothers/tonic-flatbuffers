@@ -1,6 +1,7 @@
 use winnow::{
-    combinator::{cut_err, opt, preceded, trace},
-    error::{ContextError, StrContext, StrContextValue},
+    combinator::{cut_err, opt, preceded, repeat, trace},
+    error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
+    stream::Stream,
     token::literal,
     Parser,
 };
@@ -11,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    attributes::{attribute_list, Attribute},
+    attributes::{attribute_list, Attribute, AttributeTarget},
     primitives::{table_field_type, DefaultValue, TableFieldType},
 };
 
@@ -35,6 +36,7 @@ pub struct Table<'a> {
 
 fn table_field<'a, 's: 'a>(
     state: &'a ParserState<'s>,
+    require_id: &'a mut Option<bool>,
 ) -> impl Parser<&'s str, TableField<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("table_field", |input: &mut _| {
@@ -64,7 +66,28 @@ fn table_field<'a, 's: 'a>(
 
             whitespace_and_comments_opt(input)?;
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = if input.starts_with('(') {
+                Some(
+                    attribute_list(state, AttributeTarget::TableField, require_id)
+                        .parse_next(input)?,
+                )
+            } else {
+                let checkpoint = input.checkpoint();
+                if let Some(require_id) = require_id {
+                    if *require_id {
+                        return Err(ErrMode::Cut(ContextError::new().add_context(
+                            input,
+                            &checkpoint,
+                            StrContext::Label("attribute; id must be on all fields or none"),
+                        )));
+                    } else {
+                        None
+                    }
+                } else {
+                    *require_id = Some(false);
+                    None
+                }
+            };
 
             literal(";").parse_next(input)?;
 
@@ -96,7 +119,8 @@ pub fn table_item<'a, 's: 'a>(
             // Get the table ident
             let ident = cut_err(ident).parse_next(input)?;
 
-            let attrs = opt(attribute_list(state)).parse_next(input)?;
+            let attrs = opt(attribute_list(state, AttributeTarget::TableItem, &mut None))
+                .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             // Consume the opening bracket
@@ -107,12 +131,14 @@ pub fn table_item<'a, 's: 'a>(
             // added to the field
             whitespace_all(input)?;
 
-            let mut fields = Vec::new();
+            // let mut fields = Vec::new();
+            let mut require_id = None;
 
             // Consume as many table fields as possible
-            while let Some(field) = opt(table_field(state)).parse_next(input)? {
-                fields.push(field);
-            }
+            let fields = repeat(0.., table_field(state, &mut require_id)).parse_next(input)?;
+            // while let Some(field) = opt(table_field(state, &mut require_id)).parse_next(input)? {
+            //     fields.push(field);
+            // }
 
             whitespace_and_comments_opt(input)?;
             cut_err(literal("}").context(StrContext::Expected(StrContextValue::CharLiteral('}'))))

@@ -59,11 +59,8 @@ impl<'a> ParserState<'a> {
     }
 
     fn resolve_ident_recursive(&self, ns: &str, ident: &str, decl_types: &[DeclType]) -> bool {
-        println!("resolve_ident_recursive: ns [{ns}] ident [{ident}]");
-        println!("self: {self:?}");
         // Try to match namespace
         if let Some(decls) = self.namespace_decls.get(ns) {
-            println!("Decls: {decls:?}");
             // Try to match against all the provided types
             for ty in decl_types {
                 let resolved = match ty {
