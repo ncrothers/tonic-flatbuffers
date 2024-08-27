@@ -106,6 +106,7 @@ pub enum DefaultValue<'a> {
     Float64(f64),
     String(&'a str),
     Vector,
+    Null,
 }
 
 impl<'a> DefaultValue<'a> {

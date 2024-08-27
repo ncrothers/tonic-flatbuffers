@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use winnow::{
     ascii::till_line_ending,
-    combinator::{cut_err, repeat, separated, trace},
+    combinator::{cut_err, opt, repeat, separated, trace},
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     stream::{AsChar, Stream},
     token::{literal, one_of, take_till, take_while},
@@ -56,55 +56,61 @@ pub fn default_value<'a, 's>(
             whitespace_all(input)?;
 
             match field_type {
-                TableFieldType::Scalar(scalar) => match scalar {
-                    ScalarType::Int8 => parse_to_scalar
-                        .map(DefaultValue::Int8)
-                        .context(StrContext::Expected(StrContextValue::Description("int8")))
-                        .parse_next(input),
-                    ScalarType::UInt8 => parse_to_scalar
-                        .map(DefaultValue::UInt8)
-                        .context(StrContext::Expected(StrContextValue::Description("uint8")))
-                        .parse_next(input),
-                    ScalarType::Bool => parse_to_scalar
-                        .map(DefaultValue::Bool)
-                        .context(StrContext::Expected(StrContextValue::Description("bool")))
-                        .parse_next(input),
-                    ScalarType::Int16 => parse_to_scalar
-                        .map(DefaultValue::Int16)
-                        .context(StrContext::Expected(StrContextValue::Description("int16")))
-                        .parse_next(input),
-                    ScalarType::UInt16 => parse_to_scalar
-                        .map(DefaultValue::UInt16)
-                        .context(StrContext::Expected(StrContextValue::Description("uint16")))
-                        .parse_next(input),
-                    ScalarType::Int32 => parse_to_scalar
-                        .map(DefaultValue::Int32)
-                        .context(StrContext::Expected(StrContextValue::Description("int32")))
-                        .parse_next(input),
-                    ScalarType::UInt32 => parse_to_scalar
-                        .map(DefaultValue::UInt32)
-                        .context(StrContext::Expected(StrContextValue::Description("uint32")))
-                        .parse_next(input),
-                    ScalarType::Float32 => parse_to_scalar
-                        .map(DefaultValue::Float32)
-                        .context(StrContext::Expected(StrContextValue::Description(
-                            "float32",
-                        )))
-                        .parse_next(input),
-                    ScalarType::Int64 => parse_to_scalar
-                        .map(DefaultValue::Int64)
-                        .context(StrContext::Expected(StrContextValue::Description("int64")))
-                        .parse_next(input),
-                    ScalarType::UInt64 => parse_to_scalar
-                        .map(DefaultValue::UInt64)
-                        .context(StrContext::Expected(StrContextValue::Description("uint64")))
-                        .parse_next(input),
-                    ScalarType::Float64 => parse_to_scalar
-                        .map(DefaultValue::Float64)
-                        .context(StrContext::Expected(StrContextValue::Description(
-                            "float64",
-                        )))
-                        .parse_next(input),
+                TableFieldType::Scalar(scalar) => {
+                    if opt(literal("null")).parse_next(input)?.is_some() {
+                        return Ok(DefaultValue::Null);
+                    }
+
+                    match scalar {
+                        ScalarType::Int8 => parse_to_scalar
+                            .map(DefaultValue::Int8)
+                            .context(StrContext::Expected(StrContextValue::Description("int8")))
+                            .parse_next(input),
+                        ScalarType::UInt8 => parse_to_scalar
+                            .map(DefaultValue::UInt8)
+                            .context(StrContext::Expected(StrContextValue::Description("uint8")))
+                            .parse_next(input),
+                        ScalarType::Bool => parse_to_scalar
+                            .map(DefaultValue::Bool)
+                            .context(StrContext::Expected(StrContextValue::Description("bool")))
+                            .parse_next(input),
+                        ScalarType::Int16 => parse_to_scalar
+                            .map(DefaultValue::Int16)
+                            .context(StrContext::Expected(StrContextValue::Description("int16")))
+                            .parse_next(input),
+                        ScalarType::UInt16 => parse_to_scalar
+                            .map(DefaultValue::UInt16)
+                            .context(StrContext::Expected(StrContextValue::Description("uint16")))
+                            .parse_next(input),
+                        ScalarType::Int32 => parse_to_scalar
+                            .map(DefaultValue::Int32)
+                            .context(StrContext::Expected(StrContextValue::Description("int32")))
+                            .parse_next(input),
+                        ScalarType::UInt32 => parse_to_scalar
+                            .map(DefaultValue::UInt32)
+                            .context(StrContext::Expected(StrContextValue::Description("uint32")))
+                            .parse_next(input),
+                        ScalarType::Float32 => parse_to_scalar
+                            .map(DefaultValue::Float32)
+                            .context(StrContext::Expected(StrContextValue::Description(
+                                "float32",
+                            )))
+                            .parse_next(input),
+                        ScalarType::Int64 => parse_to_scalar
+                            .map(DefaultValue::Int64)
+                            .context(StrContext::Expected(StrContextValue::Description("int64")))
+                            .parse_next(input),
+                        ScalarType::UInt64 => parse_to_scalar
+                            .map(DefaultValue::UInt64)
+                            .context(StrContext::Expected(StrContextValue::Description("uint64")))
+                            .parse_next(input),
+                        ScalarType::Float64 => parse_to_scalar
+                            .map(DefaultValue::Float64)
+                            .context(StrContext::Expected(StrContextValue::Description(
+                                "float64",
+                            )))
+                            .parse_next(input),
+                    }
                 },
                 TableFieldType::String => {
                     let value = string_literal
@@ -123,13 +129,25 @@ pub fn default_value<'a, 's>(
 
                     Ok(DefaultValue::Vector)
                 }
-                _ => Err(ErrMode::Cut(ContextError::new().add_context(
-                    input,
-                    &checkpoint,
-                    StrContext::Label(
-                        "default value; default values for this type are not supported",
-                    ),
-                ))),
+                TableFieldType::Named(_) => {
+                    // Allow null as a default type for named types
+                    if opt(literal("null")).parse_next(input)?.is_some() {
+                        Ok(DefaultValue::Null)
+                    } else {
+                        Err(ErrMode::Cut(
+                            ContextError::new()
+                                .add_context(input, &checkpoint, StrContext::Label("default value"))
+                                .add_context(
+                                    input,
+                                    &checkpoint,
+                                    StrContext::Expected(StrContextValue::Description(
+                                        "default values for this type are not supported",
+                                    )),
+                                ),
+                        ))
+                    }
+
+                }
             }
         })
         .context(StrContext::Label("default value"))
