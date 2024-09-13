@@ -58,7 +58,7 @@ fn main() {
 
     let include_paths = vec![PathBuf::from("../examples/helloworld/fbs")];
 
-    let files_to_compile = glob::glob("../examples/helloworld/fbs/service2.fbs")
+    let files_to_compile = glob::glob("../examples/helloworld/fbs/service.fbs")
         .unwrap()
         .map(|path| {
             let path = path?;

@@ -20,4 +20,5 @@ rpc_service HelloWorldStreaming {
     HelloStreamServer(Request): Response (streaming: "server");
     HelloStreamClient(Request): Response (streaming: "client");
     HelloStreamBidirectional(Request): Response (streaming: "bidi");
+    HelloStreamBidirectional(Request): Response (streaming: "bid");
 }

@@ -111,7 +111,7 @@ pub fn default_value<'a, 's>(
                             )))
                             .parse_next(input),
                     }
-                },
+                }
                 TableFieldType::String => {
                     let value = string_literal
                         .context(StrContext::Expected(StrContextValue::Description(
@@ -146,7 +146,6 @@ pub fn default_value<'a, 's>(
                                 ),
                         ))
                     }
-
                 }
             }
         })

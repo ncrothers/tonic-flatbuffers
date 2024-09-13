@@ -15,6 +15,8 @@ use crate::{
     utils::{ident, string_literal, whitespace_and_comments_opt},
 };
 
+use super::rpc_service::StreamingMode;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AttributeTarget {
     EnumItem,
@@ -25,6 +27,8 @@ pub enum AttributeTarget {
     TableField,
     UnionItem,
     UnionVariant,
+    RpcService,
+    RpcMethod,
 }
 
 pub type StrCheckpoint<'a> = Checkpoint<&'a str, &'a str>;
@@ -54,6 +58,7 @@ pub enum Attribute<'a> {
     NestedFlatBuffer(&'a str),
     OriginalOrder,
     Required,
+    Streaming(StreamingMode),
     Custom {
         name: &'a str,
         value: Option<&'a str>,
@@ -73,6 +78,7 @@ impl<'a> Attribute<'a> {
             "nested_flatbuffer" => Self::NestedFlatBuffer(""),
             "original_order" => Self::OriginalOrder,
             "required" => Self::Required,
+            "streaming" => Self::Streaming(StreamingMode::None),
             custom => Self::Custom {
                 name: custom,
                 value: None,
@@ -92,6 +98,7 @@ impl<'a> Attribute<'a> {
             Attribute::NestedFlatBuffer(_) => "nested_flatbuffer",
             Attribute::OriginalOrder => "original_order",
             Attribute::Required => "required",
+            Attribute::Streaming(_) => "streaming",
             Attribute::Custom { name, .. } => name,
         }
     }
@@ -114,6 +121,7 @@ impl<'a> Attribute<'a> {
             Attribute::NestedFlatBuffer(_) => matches!(target, AttributeTarget::TableField),
             Attribute::OriginalOrder => matches!(target, AttributeTarget::TableItem),
             Attribute::Required => matches!(target, AttributeTarget::TableField),
+            Attribute::Streaming(_) => matches!(target, AttributeTarget::RpcMethod),
             // Custom is always allowed
             Attribute::Custom { .. } => true,
         }
@@ -126,12 +134,16 @@ impl<'a> Attribute<'a> {
                 | Self::Hash(_)
                 | Self::Id(_)
                 | Self::NestedFlatBuffer(_)
+                | Self::Streaming(_)
                 | Self::Custom { .. }
         )
     }
 
     pub fn has_str_value(&self) -> bool {
-        matches!(self, Self::Hash(_) | Self::NestedFlatBuffer(_))
+        matches!(
+            self,
+            Self::Hash(_) | Self::NestedFlatBuffer(_) | Self::Streaming(_)
+        )
     }
 
     pub fn has_u64_value(&self) -> bool {
@@ -142,10 +154,27 @@ impl<'a> Attribute<'a> {
         matches!(self, Self::Custom { .. })
     }
 
+    pub fn validate_str_value(&self, value: &str) -> bool {
+        match self {
+            Self::Streaming(_) => ["none", "client", "server", "bidi"].contains(&value),
+            // TODO: Implement validation for other string types
+            _ => true,
+        }
+    }
+
     pub fn insert_value_str(&mut self, value: &'a str) {
         match self {
             Self::Hash(val) => *val = value,
             Self::NestedFlatBuffer(val) => *val = value,
+            Self::Streaming(val) => {
+                *val = match value {
+                    "none" => StreamingMode::None,
+                    "client" => StreamingMode::Client,
+                    "server" => StreamingMode::Server,
+                    "bidi" => StreamingMode::Bidirectional,
+                    _ => unreachable!(),
+                }
+            }
             _ => (),
         }
     }
@@ -203,7 +232,10 @@ fn parse_attribute<'a, 's: 'a>(
                 whitespace_and_comments_opt(input)?;
 
                 if attr.has_str_value() {
-                    let value = string_literal.parse_next(input)?;
+                    let value = string_literal
+                        .verify(|value| attr.validate_str_value(value))
+                        .context(StrContext::Label("value for this attribute"))
+                        .parse_next(input)?;
 
                     attr.insert_value_str(value);
                 } else if attr.has_u64_value() {

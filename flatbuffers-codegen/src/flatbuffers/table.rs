@@ -149,9 +149,6 @@ pub fn table_item<'a, 's: 'a>(
             // Consume as many table fields as possible
             let fields: Vec<_> =
                 repeat(0.., table_field(state, &mut require_id)).parse_next(input)?;
-            // while let Some(field) = opt(table_field(state, &mut require_id)).parse_next(input)? {
-            //     fields.push(field);
-            // }
 
             // Validate the ID attributes
             let n_fields = fields.len() as u64;

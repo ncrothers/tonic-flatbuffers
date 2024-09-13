@@ -16,6 +16,7 @@ use crate::{
 use super::{
     r#enum::{enum_item, Enum},
     r#struct::{struct_item, Struct},
+    rpc_service::{rpc_service_item, RpcService},
     table::{table_item, Table},
     union::{union_item, Union},
 };
@@ -29,6 +30,7 @@ pub enum Item<'a> {
     FileIdentifier(&'a str),
     Include(&'a str),
     Namespace(&'a str),
+    RpcService(RpcService<'a>),
     RootType(&'a str),
     Struct(Struct<'a>),
     Table(Table<'a>),
@@ -47,6 +49,7 @@ pub fn item<'a, 's: 'a>(
                 file_identifier(state).map(Item::FileIdentifier),
                 include(state).map(Item::Include),
                 namespace(state).map(Item::Namespace),
+                rpc_service_item(state).map(Item::RpcService),
                 root_type(state).map(Item::RootType),
                 struct_item(state).map(Item::Struct),
                 table_item(state).map(Item::Table),
