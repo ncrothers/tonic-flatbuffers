@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 
 use winnow::{
     combinator::{cut_err, opt, separated, trace},
@@ -58,6 +58,7 @@ pub struct Enum<'a> {
 
 fn enum_variant<'a, 's: 'a, T>(
     state: &'a ParserState<'s>,
+    field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, EnumVariant<'s, T>, ContextError> + 'a
 where
     T: FromStr + TypeName,
@@ -66,11 +67,23 @@ where
         trace("enum_variant", |input: &mut _| {
             let comments = whitespace_and_comments_opt(input)?;
 
+            let ident_chk = input.checkpoint();
             let ident = ident
                 .context(StrContext::Expected(StrContextValue::Description(
                     "enum identifier",
                 )))
                 .parse_next(input)?;
+
+            if field_idents.contains(&ident) {
+                input.reset(&ident_chk);
+                return Err(ErrMode::Cut(ContextError::new().add_context(
+                    input,
+                    &ident_chk,
+                    StrContext::Label("; duplicate field name"),
+                )));
+            }
+
+            field_idents.insert(ident);
 
             whitespace_and_comments_opt(input)?;
 
@@ -154,8 +167,9 @@ pub fn enum_item<'a, 's: 'a>(
                 state: &'a ParserState<'s>,
             ) -> impl Parser<&'s str, Vec<EnumVariant<'s, T>>, ContextError> + 'a {
                 move |input: &mut _| {
-                    let variants =
-                        cut_err(separated(0.., enum_variant(state), ",")).parse_next(input)?;
+                    let mut field_idents = HashSet::new();
+                    let variants = separated(0.., enum_variant(state, &mut field_idents), ",")
+                        .parse_next(input)?;
                     // Consume a trailing comma, if present
                     opt(literal(",")).parse_next(input)?;
 
@@ -244,24 +258,24 @@ pub fn enum_item<'a, 's: 'a>(
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
-    #[test]
-    fn r#enum() {
-        let enum1_str = r#"
-            enum Hello : uint32 {
-                Variant1 = 0,
-                Variant2,
-                Variant3
-            }"#;
-
-        let enum1 = Enum {
+    #[rstest]
+    #[case::simple(
+        r#"enum Hello : uint32 {
+            Variant1,
+            Variant2,
+            Variant3
+        }"#,
+        Enum {
             name: "Hello",
             namespace: "",
             variants: EnumData::UInt32(vec![
                 EnumVariant {
                     name: "Variant1",
-                    idx: Some(0),
+                    idx: None,
                     comments: Vec::new(),
                     attributes: Vec::new(),
                 },
@@ -280,18 +294,17 @@ mod tests {
             ]),
             comments: Vec::new(),
             attributes: Vec::new(),
-        };
-
-        let enum2_str = r#"
-            // This is NOT documentation
-            /// This is a comment!
-            enum Hello_There : int (bit_flags) {
-                Variant1,
-                /// Comment
-                Variant2 = 1 (custom_attr),
-            }"#;
-
-        let enum2 = Enum {
+        }
+    )]
+    #[case::comments(
+        r#"// This is NOT documentation
+        /// This is a comment!
+        enum Hello_There : int {
+            Variant1,
+            /// Comment
+            Variant2,
+        }"#,
+        Enum {
             name: "Hello_There",
             namespace: "",
             variants: EnumData::Int32(vec![
@@ -303,60 +316,111 @@ mod tests {
                 },
                 EnumVariant {
                     name: "Variant2",
-                    idx: Some(1),
+                    idx: None,
                     comments: vec!["Comment"],
-                    attributes: vec![Attribute::Custom {
-                        name: "custom_attr",
-                        value: None,
-                    }],
+                    attributes: Vec::new(),
                 },
             ]),
             comments: vec!["This is a comment!"],
+            attributes: Vec::new(),
+        }
+    )]
+    #[case::indices(
+        r#"enum Hello_There : int {
+            Variant1 = 0,
+            Variant2 = 1,
+        }"#,
+        Enum {
+            name: "Hello_There",
+            namespace: "",
+            variants: EnumData::Int32(vec![
+                EnumVariant {
+                    name: "Variant1",
+                    idx: Some(0),
+                    comments: Vec::new(),
+                    attributes: Vec::new(),
+                },
+                EnumVariant {
+                    name: "Variant2",
+                    idx: Some(1),
+                    comments: Vec::new(),
+                    attributes: Vec::new(),
+                },
+            ]),
+            comments: Vec::new(),
+            attributes: Vec::new(),
+        }
+    )]
+    #[case::attributes(
+        r#"enum Hello_There : int (bit_flags) {
+            Variant1,
+            Variant2 (custom_attr: "foo"),
+        }"#,
+        Enum {
+            name: "Hello_There",
+            namespace: "",
+            variants: EnumData::Int32(vec![
+                EnumVariant {
+                    name: "Variant1",
+                    idx: None,
+                    comments: Vec::new(),
+                    attributes: Vec::new(),
+                },
+                EnumVariant {
+                    name: "Variant2",
+                    idx: None,
+                    comments: Vec::new(),
+                    attributes: vec![Attribute::Custom { name: "custom_attr", value: Some("foo") }],
+                },
+            ]),
+            comments: Vec::new(),
             attributes: vec![Attribute::BitFlags],
-        };
-
-        let valid = [(enum1_str, enum1), (enum2_str, enum2)];
-
+        }
+    )]
+    fn enum_pass(#[case] item_str: &str, #[case] output: Enum) {
         let state = ParserState::new();
 
-        for (item_str, item) in valid {
-            assert_eq!(
-                enum_item(&state)
-                    .parse(item_str)
-                    .inspect_err(|e| println!("{e}")),
-                Ok(item)
-            );
-        }
+        assert_eq!(
+            enum_item(&state)
+                .parse(item_str)
+                .inspect_err(|e| println!("{e}")),
+            Ok(output)
+        );
+    }
 
-        let enum_invalid1 = r#"
-            enum Hello_There : int32 {
-                Variant bla,
-            }
-        "#;
+    #[rstest]
+    #[case::invalid_field_def(
+        r#"enum Hello_There : int32 {
+            Variant bla,
+        }"#
+    )]
+    #[case::missing_datatype(
+        r#"enum Hello_There {
+            Variant = 1,
+        }"#
+    )]
+    #[case::invalid_field_ident(
+        r#"enum Hello_There : int8 {
+            1var,
+        }"#
+    )]
+    #[case::incomplete_attributes(
+        r#"enum Hello_There : int8 {
+            Variant (incomplete,
+        }"#
+    )]
+    #[case::duplicate_variant(
+        r#"enum Hello_There : int8 {
+            Variant1,
+            Variant1,
+        }"#
+    )]
+    fn enum_fail(#[case] item_str: &str) {
+        let state = ParserState::new();
 
-        let enum_invalid2 = r#"
-            enum Hello_There {
-                Variant = 1,
-            }
-        "#;
-
-        let enum_invalid3 = r#"
-            enum Hello_There : int8 {
-                1var,
-            }
-        "#;
-
-        let enum_invalid4 = r#"
-            enum Hello_There : int8 {
-                Variant (incomplete,
-            }
-        "#;
-
-        let invalid = [enum_invalid1, enum_invalid2, enum_invalid3, enum_invalid4];
-
-        for item in invalid {
-            let mut value = item;
-            assert!(enum_item(&state).parse_next(&mut value).is_err());
-        }
+        assert!(enum_item(&state)
+            .parse(item_str)
+            .inspect_err(|e| println!("{e}"))
+            .is_err());
     }
 }

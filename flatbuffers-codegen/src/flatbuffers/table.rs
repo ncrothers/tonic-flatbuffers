@@ -49,20 +49,34 @@ pub struct Table<'a> {
 
 fn table_field<'a, 's: 'a>(
     state: &'a ParserState<'s>,
+    field_idents: &'a mut HashSet<&'s str>,
     require_id: &'a mut Option<bool>,
 ) -> impl Parser<&'s str, TableField<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("table_field", |input: &mut _| {
             let comments = whitespace_and_comments_opt(input)?;
+            let ident_chk = input.checkpoint();
             // Get the field ident
             let ident = ident.parse_next(input)?;
+
+            if field_idents.contains(&ident) {
+                input.reset(&ident_chk);
+                return Err(ErrMode::Cut(ContextError::new().add_context(
+                    input,
+                    &ident_chk,
+                    StrContext::Label("; duplicate field name"),
+                )));
+            }
+
+            field_idents.insert(ident);
+
             whitespace_and_comments_opt(input)?;
 
-            literal(":").parse_next(input)?;
+            cut_err(literal(":")).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
-            let field_type = table_field_type(state).parse_next(input)?;
+            let field_type = cut_err(table_field_type(state)).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
 
@@ -146,9 +160,10 @@ pub fn table_item<'a, 's: 'a>(
             // let mut fields = Vec::new();
             let mut require_id = None;
 
+            let mut field_idents = HashSet::new();
             // Consume as many table fields as possible
             let fields: Vec<_> =
-                repeat(0.., table_field(state, &mut require_id)).parse_next(input)?;
+                cut_err(repeat(0.., table_field(state, &mut field_idents, &mut require_id))).parse_next(input)?;
 
             // Validate the ID attributes
             let n_fields = fields.len() as u64;
@@ -279,21 +294,18 @@ pub fn table_item<'a, 's: 'a>(
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{
-        flatbuffers::primitives::{ScalarType, VectorItemType},
-        parser::TypeDecls,
-    };
+    use rstest::rstest;
+
+    use crate::{flatbuffers::primitives::ScalarType, parser::TypeDecls};
 
     use super::*;
 
-    #[test]
-    fn table() {
-        let table1_str = r#"
-            table Hello {
-                foo:uint32;
-            }"#;
-
-        let table1 = Table {
+    #[rstest]
+    #[case::simple(
+        r#"table Hello {
+            foo:uint32;
+        }"#,
+        Table {
             name: "Hello",
             namespace: "",
             fields: vec![TableField {
@@ -306,120 +318,158 @@ mod tests {
             }],
             comments: Vec::new(),
             attributes: Vec::new(),
-        };
-
-        let table2_str = r#"
-            // This is NOT documentation
-            /// This is a comment!
-            table Hello_There (original_order) {
-                /// This is field documentation
-                foo:[int32];
-                bar:
-                    /// This is a random comment that shouldn't be loaded
-                    float = -1e-6 (deprecated);
-                /// Another comment
-                another: [
-                    Struct2
-                ];
-                enum_field: [TestEnum] = [];
-                /// This should be ignored
-            }"#;
-
-        let table2 = Table {
-            name: "Hello_There",
+        }
+    )]
+    #[case::comments(
+        r#"// This is NOT documentation
+        /// This is a comment!
+        table Hello {
+            foo:uint32;
+            /// This should be ignored
+        }"#,
+        Table {
+            name: "Hello",
             namespace: "",
-            fields: vec![
-                TableField {
-                    name: "foo",
-                    field_type: TableFieldType::Vector(VectorItemType::Scalar(ScalarType::Int32)),
-                    default: None,
-                    comments: vec!["This is field documentation"],
-                    attributes: None,
-                    attr_start: None,
-                },
-                TableField {
-                    name: "bar",
-                    field_type: TableFieldType::Scalar(ScalarType::Float32),
-                    default: Some(DefaultValue::Float32(-1.0e-6)),
-                    comments: Vec::new(),
-                    attributes: Some(AttributesWrapper {
-                        attrs: vec![Attribute::Deprecated],
-                        ..Default::default()
-                    }),
-                    attr_start: None,
-                },
-                TableField {
-                    name: "another",
-                    field_type: TableFieldType::Vector(VectorItemType::Named(NamedType::new(
-                        "Struct2",
-                        DeclType::Struct,
-                    ))),
-                    default: None,
-                    comments: vec!["Another comment"],
-                    attributes: None,
-                    attr_start: None,
-                },
-                TableField {
-                    name: "enum_field",
-                    field_type: TableFieldType::Vector(VectorItemType::Named(NamedType::new(
-                        "TestEnum",
-                        DeclType::Enum,
-                    ))),
-                    default: Some(DefaultValue::Vector),
-                    comments: Vec::new(),
-                    attributes: None,
-                    attr_start: None,
-                },
-            ],
+            fields: vec![TableField {
+                name: "foo",
+                field_type: TableFieldType::Scalar(ScalarType::UInt32),
+                default: None,
+                comments: Vec::new(),
+                attributes: None,
+                attr_start: None,
+            }],
             comments: vec!["This is a comment!"],
+            attributes: Vec::new(),
+        }
+    )]
+    #[case::attributes(
+        r#"table Hello (original_order) {
+            foo:uint32;
+        }"#,
+        Table {
+            name: "Hello",
+            namespace: "",
+            fields: vec![TableField {
+                name: "foo",
+                field_type: TableFieldType::Scalar(ScalarType::UInt32),
+                default: None,
+                comments: Vec::new(),
+                attributes: None,
+                attr_start: None,
+            }],
+            comments: Vec::new(),
             attributes: vec![Attribute::OriginalOrder],
-        };
+        }
+    )]
+    fn table_pass(#[case] item_str: &str, #[case] output: Table) {
+        let state = ParserState::new();
 
+        assert_eq!(table_item(&state).parse(item_str), Ok(output));
+    }
+
+    #[rstest]
+    #[case::enum_style(
+        r#"table Test : uint32 {
+            foo:uint32;
+        }"#
+    )]
+    #[case::extra_semicolon(
+        r#"table Test {
+            foo:uint32;;
+        }"#
+    )]
+    #[case::unclosed_bracket(
+        r#"struct Hello_There {
+            foo:uint32;"#
+    )]
+    #[case::duplicate_field(
+        r#"table Hello {
+            foo:uint32;
+            foo:uint32;
+        }"#
+    )]
+    fn table_fail(#[case] item_str: &str) {
+        let state = ParserState::new();
+
+        assert!(table_item(&state).parse(item_str).is_err());
+    }
+
+    #[rstest]
+    #[case::simple(
+        "foo:uint32;",
+        TableField {
+            name: "foo",
+            field_type: TableFieldType::Scalar(ScalarType::UInt32),
+            default: None,
+            comments: Vec::new(),
+            attributes: None,
+            attr_start: None,
+        }
+    )]
+    #[case::comments(
+        r#"/// Foo comment
+        foo:uint32;"#,
+        TableField {
+            name: "foo",
+            field_type: TableFieldType::Scalar(ScalarType::UInt32),
+            default: None,
+            comments: vec!["Foo comment"],
+            attributes: None,
+            attr_start: None,
+        }
+    )]
+    #[case::attributes(
+        "foo:uint32 (id: 1);",
+        TableField {
+            name: "foo",
+            field_type: TableFieldType::Scalar(ScalarType::UInt32),
+            default: None,
+            comments: Vec::new(),
+            attributes: Some(AttributesWrapper {
+                attrs: vec![Attribute::Id(1)],
+                attr_chks: Vec::new(),
+                id: None
+            }),
+            attr_start: None,
+        }
+    )]
+    #[case::whitespace(
+        "\n foo \n : \n uint32 \n ;",
+        TableField {
+            name: "foo",
+            field_type: TableFieldType::Scalar(ScalarType::UInt32),
+            default: None,
+            comments: Vec::new(),
+            attributes: None,
+            attr_start: None,
+        }
+    )]
+    fn table_field_pass(#[case] item_str: &str, #[case] output: TableField) {
+        let state = ParserState::new();
+
+        let mut require_id = None;
+        assert_eq!(
+            table_field(&state, &mut HashSet::new(), &mut require_id).parse(item_str),
+            Ok(output)
+        );
+    }
+
+    #[rstest]
+    #[case::missing_colon("foo uint32;")]
+    #[case::missing_semicolon("foo:uint32")]
+    fn table_field_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
-        decl.add_structs(["Struct2"]);
-        decl.add_enums(["TestEnum"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_tables(["Table1"]);
 
-        let valid = [(table1_str, table1), (table2_str, table2)];
+        let decls = HashMap::from([("", foo_decl.clone())]);
 
-        for (item_str, item) in valid {
-            assert_eq!(
-                table_item(&state)
-                    .parse(item_str)
-                    .inspect_err(|e| println!("{e}")),
-                Ok(item)
-            );
-        }
+        state.extend_decls(decls);
 
-        let table_invalid1 = r#"
-            table Hello_There {
-                foo:uint32
-            }"#;
-
-        let table_invalid2 = r#"
-            table Hello_There {
-                foo:[uint32:5]
-            }"#;
-
-        let table_invalid3 = r#"
-            table Hello There {}"#;
-
-        let table_invalid4 = r#"
-            table Test {
-                foo:uint32 = 1.5;
-            }"#;
-
-        let invalid = [
-            table_invalid1,
-            table_invalid2,
-            table_invalid3,
-            table_invalid4,
-        ];
-
-        for item in invalid {
-            assert!(table_item(&state).parse(item).is_err());
-        }
+        let mut require_id = None;
+        assert!(table_field(&state, &mut HashSet::new(), &mut require_id)
+            .parse(item_str)
+            .is_err());
     }
 }

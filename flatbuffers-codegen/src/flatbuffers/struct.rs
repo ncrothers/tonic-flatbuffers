@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use winnow::{
-    combinator::{opt, trace},
-    error::{ContextError, StrContext, StrContextValue},
+    combinator::{opt, repeat, trace},
+    error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
+    stream::Stream,
     token::literal,
     Parser,
 };
@@ -34,16 +37,31 @@ pub struct Struct<'a> {
 
 fn struct_field<'a, 's: 'a>(
     state: &'a ParserState<'s>,
+    field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, StructField<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("struct_field", |input: &mut _| {
             let comments = whitespace_and_comments_opt(input)?;
+            let ident_chk = input.checkpoint();
             // Get the field ident
             let ident = ident
                 .context(StrContext::Expected(StrContextValue::Description(
                     "struct field identifier",
                 )))
                 .parse_next(input)?;
+
+            if field_idents.contains(&ident) {
+                input.reset(&ident_chk);
+                return Err(ErrMode::Cut(ContextError::new().add_context(
+                    input,
+                    &ident_chk,
+                    StrContext::Label("; duplicate field name"),
+                )));
+            }
+
+            field_idents.insert(ident);
+
+            whitespace_and_comments_opt.parse_next(input)?;
 
             literal(":")
                 .context(StrContext::Expected(StrContextValue::StringLiteral(":")))
@@ -102,12 +120,9 @@ pub fn struct_item<'a, 's: 'a>(
             // added to the field
             whitespace_all(input)?;
 
-            let mut fields = Vec::new();
-
+            let mut field_idents = HashSet::new();
             // Consume as many struct fields as possible
-            while let Some(field) = opt(struct_field(state)).parse_next(input)? {
-                fields.push(field);
-            }
+            let fields = repeat(0.., struct_field(state, &mut field_idents)).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             literal("}")
@@ -130,21 +145,18 @@ pub fn struct_item<'a, 's: 'a>(
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{
-        flatbuffers::primitives::{Array, ArrayItemType, ScalarType},
-        parser::{DeclType, NamedType, TypeDecls},
-    };
+    use rstest::rstest;
+
+    use crate::{flatbuffers::primitives::ScalarType, parser::TypeDecls};
 
     use super::*;
 
-    #[test]
-    fn r#struct() {
-        let struct1_str = r#"
-            struct Hello {
-                foo:uint32;
-            }"#;
-
-        let struct1 = Struct {
+    #[rstest]
+    #[case::simple(
+        r#"struct Hello {
+            foo:uint32;
+        }"#,
+        Struct {
             name: "Hello",
             namespace: "",
             fields: vec![StructField {
@@ -155,94 +167,141 @@ mod tests {
             }],
             comments: Vec::new(),
             attributes: Vec::new(),
-        };
-
-        let struct2_str = r#"
-            // This is NOT documentation
-            /// This is a comment!
-            struct Hello_There (force_align: 10) {
-                /// This is field documentation
-                foo:[int32:50];
-                /// Bar comment
-                bar:
-                    /// This is a random comment that shouldn't be loaded
-                    float  ;
-                another: [
-                    Struct2:
-                    5
-                ];
-                /// This should be ignored
-            }"#;
-
-        let struct2 = Struct {
-            name: "Hello_There",
+        }
+    )]
+    #[case::comments(
+        r#"// This is NOT documentation
+        /// This is a comment!
+        struct Hello {
+            foo:uint32;
+            /// This should be ignored
+        }"#,
+        Struct {
+            name: "Hello",
             namespace: "",
-            fields: vec![
-                StructField {
-                    name: "foo",
-                    field_type: StructFieldType::Array(Array {
-                        item_type: ArrayItemType::Scalar(ScalarType::Int32),
-                        length: 50,
-                    }),
-                    comments: vec!["This is field documentation"],
-                    attributes: Vec::new(),
-                },
-                StructField {
-                    name: "bar",
-                    field_type: StructFieldType::Scalar(ScalarType::Float32),
-                    comments: vec!["Bar comment"],
-                    attributes: Vec::new(),
-                },
-                StructField {
-                    name: "another",
-                    field_type: StructFieldType::Array(Array {
-                        item_type: ArrayItemType::Named(NamedType::new(
-                            "Struct2",
-                            DeclType::Struct,
-                        )),
-                        length: 5,
-                    }),
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-            ],
+            fields: vec![StructField {
+                name: "foo",
+                field_type: StructFieldType::Scalar(ScalarType::UInt32),
+                comments: Vec::new(),
+                attributes: Vec::new(),
+            }],
             comments: vec!["This is a comment!"],
+            attributes: Vec::new(),
+        }
+    )]
+    #[case::attributes(
+        r#"struct Hello (force_align: 10) {
+            foo:uint32;
+        }"#,
+        Struct {
+            name: "Hello",
+            namespace: "",
+            fields: vec![StructField {
+                name: "foo",
+                field_type: StructFieldType::Scalar(ScalarType::UInt32),
+                comments: Vec::new(),
+                attributes: Vec::new(),
+            }],
+            comments: Vec::new(),
             attributes: vec![Attribute::ForceAlign(10)],
-        };
+        }
+    )]
+    fn struct_pass(#[case] item_str: &str, #[case] output: Struct) {
+        let state = ParserState::new();
 
-        let valid = [(struct1_str, struct1), (struct2_str, struct2)];
+        assert_eq!(struct_item(&state).parse(item_str), Ok(output));
+    }
 
+    #[rstest]
+    #[case::enum_style(
+        r#"struct Hello_There : uint32 {
+            foo:uint32;
+        }"#
+    )]
+    #[case::extra_semicolon(
+        r#"struct Hello_There {
+            foo:uint32;;
+        }"#
+    )]
+    #[case::unclosed_bracket(
+        r#"struct Hello_There {
+            foo:uint32;"#
+    )]
+    #[case::duplicate_field(
+        r#"struct Hello {
+            foo:uint32;
+            foo:uint32;
+        }"#
+    )]
+    fn struct_fail(#[case] item_str: &str) {
+        let state = ParserState::new();
+
+        assert!(struct_item(&state).parse(item_str).is_err());
+    }
+
+    #[rstest]
+    #[case::simple(
+        "foo:uint32;",
+        StructField {
+            name: "foo",
+            field_type: StructFieldType::Scalar(ScalarType::UInt32),
+            comments: Vec::new(),
+            attributes: Vec::new(),
+        }
+    )]
+    #[case::comments(
+        r#"/// Foo comment
+        foo:uint32;"#,
+        StructField {
+            name: "foo",
+            field_type: StructFieldType::Scalar(ScalarType::UInt32),
+            comments: vec!["Foo comment"],
+            attributes: Vec::new(),
+        }
+    )]
+    #[case::attributes(
+        "foo:uint32 (custom_attr);",
+        StructField {
+            name: "foo",
+            field_type: StructFieldType::Scalar(ScalarType::UInt32),
+            comments: Vec::new(),
+            attributes: vec![Attribute::Custom { name: "custom_attr", value: None }],
+        }
+    )]
+    #[case::whitespace(
+        "\n foo \n : \n uint32 \n ;",
+        StructField {
+            name: "foo",
+            field_type: StructFieldType::Scalar(ScalarType::UInt32),
+            comments: Vec::new(),
+            attributes: Vec::new(),
+        }
+    )]
+    fn struct_field_pass(#[case] item_str: &str, #[case] output: StructField) {
+        let state = ParserState::new();
+
+        assert_eq!(
+            struct_field(&state, &mut HashSet::new()).parse(item_str),
+            Ok(output)
+        );
+    }
+
+    #[rstest]
+    #[case::missing_colon("foo uint32;")]
+    #[case::missing_semicolon("foo:uint32")]
+    #[case::invalid_type("foo:Table1;")]
+    fn struct_field_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
-        decl.add_structs(["Struct2"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_tables(["Table1"]);
 
-        for (item_str, item) in valid {
-            let value = item_str;
-            let res = struct_item(&state)
-                .parse(value)
-                .inspect_err(|e| println!("{e}"));
-            assert_eq!(res, Ok(item));
-        }
+        let decls = HashMap::from([("", foo_decl.clone())]);
 
-        let struct_invalid1 = r#"
-            struct Hello_There {
-                foo:uint32
-            }"#;
+        state.extend_decls(decls);
 
-        let struct_invalid2 = r#"
-            struct Hello_There {
-                foo:[uint32]
-            }"#;
-
-        let struct_invalid3 = r#"
-            struct Hello There {}"#;
-
-        let invalid = [struct_invalid1, struct_invalid2, struct_invalid3];
-
-        for item in invalid {
-            assert!(struct_item(&state).parse(item).is_err());
-        }
+        assert!(struct_field(&state, &mut HashSet::new())
+            .parse(item_str)
+            .is_err());
     }
 }

@@ -4,7 +4,7 @@ use std::{
 };
 
 use winnow::{
-    combinator::{alt, repeat, rest, trace},
+    combinator::{alt, cut_err, repeat, rest, trace},
     token::take_until,
     PResult, Parser,
 };

@@ -26,9 +26,9 @@ pub enum ArrayItemType<'a> {
 
 #[derive(Debug, PartialEq)]
 pub enum TableFieldType<'a> {
+    Named(NamedType<'a>),
     Scalar(ScalarType),
     String,
-    Named(NamedType<'a>),
     Vector(VectorItemType<'a>),
 }
 
@@ -45,14 +45,6 @@ pub enum StructFieldType<'a> {
 pub enum VectorItemType<'a> {
     Named(NamedType<'a>),
     Scalar(ScalarType),
-    String,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum BuiltInTable<'a> {
-    Scalar(ScalarType),
-    Vector(VectorItemType<'a>),
-    /// UTF-8 or ASCII only
     String,
 }
 
@@ -178,13 +170,6 @@ pub fn array_type<'a, 's: 'a>(
                     .map(ArrayItemType::Named),
             ))
             .parse_next(input)?;
-            // let item_type = resolved_ident(state, &[DeclType::Enum, DeclType::Struct]).parse_next(input).map(|ident| {
-            //     if let Some(scalar) = ScalarType::parse(ident) {
-            //         ArrayItemType::Scalar(scalar)
-            //     } else {
-            //         ArrayItemType::Named(ident)
-            //     }
-            // })?;
 
             whitespace_and_comments_opt(input)?;
 
@@ -228,15 +213,6 @@ pub fn struct_field_type<'a, 's: 'a>(
                         .map(StructFieldType::Named),
                 ))
                 .parse_next(input)?
-
-                // let ident = resolved_ident(state, &[DeclType::Enum, DeclType::Struct]).parse_next(input)?;
-
-                // if let Some(scalar) = ScalarType::parse(ident) {
-                //     StructFieldType::Scalar(scalar)
-                // } else {
-
-                //     StructFieldType::Named(ident)
-                // }
             };
 
             Ok(val)
@@ -263,8 +239,6 @@ pub fn vector_type<'a, 's: 'a>(
                 resolved_ident(state, DeclType::ANY).map(VectorItemType::Named),
             ))
             .parse_next(input)?;
-
-            // let value = resolved_ident(state, DeclType::ANY).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             // Try to consume a closing square bracket
@@ -335,23 +309,30 @@ pub fn scalar_type(input: &mut &str) -> PResult<ScalarType> {
 mod tests {
     use std::collections::HashMap;
 
+    use rstest::rstest;
+
     use crate::parser::TypeDecls;
 
     use super::*;
 
-    #[test]
-    fn scalar() {
-        let valid = [
-            ("uint32", ScalarType::UInt32),
-            ("uint", ScalarType::UInt32),
-            ("float", ScalarType::Float32),
-            ("byte", ScalarType::Int8),
-        ];
-
-        for (item_str, item) in valid {
-            let mut value = item_str;
-            assert_eq!(scalar_type.parse_next(&mut value), Ok(item));
-        }
+    #[rstest]
+    #[case::uint8("uint8", ScalarType::UInt8)]
+    #[case::int8("int8", ScalarType::Int8)]
+    #[case::byte("byte", ScalarType::Int8)]
+    #[case::ubyte("ubyte", ScalarType::UInt8)]
+    #[case::uint16("uint16", ScalarType::UInt16)]
+    #[case::int16("int16", ScalarType::Int16)]
+    #[case::uint32("uint32", ScalarType::UInt32)]
+    #[case::int32("int32", ScalarType::Int32)]
+    #[case::uint("uint", ScalarType::UInt32)]
+    #[case::int("int", ScalarType::Int32)]
+    #[case::bool("bool", ScalarType::Bool)]
+    #[case::float32("float32", ScalarType::Float32)]
+    #[case::float("float", ScalarType::Float32)]
+    #[case::float64("float64", ScalarType::Float64)]
+    #[case::double("double", ScalarType::Float64)]
+    fn scalar_pass(#[case] item_str: &str, #[case] output: ScalarType) {
+        assert_eq!(scalar_type.parse(item_str), Ok(output));
 
         let invalid = ["i32", "_uint32", "_float"];
 
@@ -361,207 +342,173 @@ mod tests {
         }
     }
 
-    #[test]
-    fn vector_wrapped() {
-        let mut state = ParserState::new();
-
-        let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs(["foo"]);
-
-        let decls = HashMap::from([
-            ("", foo_decl.clone()),
-            ("namespace", foo_decl.clone()),
-            ("one.two.three", foo_decl.clone()),
-        ]);
-
-        state.extend_decls(decls);
-
-        let valid = [
-            ("[uint32]", VectorItemType::Scalar(ScalarType::UInt32)),
-            (
-                "[foo]",
-                VectorItemType::Named(NamedType::new("foo", DeclType::Struct)),
-            ),
-            (
-                "[ namespace.foo]",
-                VectorItemType::Named(NamedType::new("namespace.foo", DeclType::Struct)),
-            ),
-            ("[float32 ]", VectorItemType::Scalar(ScalarType::Float32)),
-        ];
-
-        for (item_str, item) in valid {
-            let mut value = item_str;
-            assert_eq!(vector_type(&state).parse_next(&mut value), Ok(item));
-        }
-
-        let invalid = [
-            "uint32",
-            "[uint32",
-            "uint32]",
-            "[uint32 asd]",
-            "a  c",
-            "[invalid_type]",
-        ];
-
-        for item in invalid {
-            let mut value = item;
-            assert!(vector_type(&state).parse_next(&mut value).is_err());
-        }
+    #[rstest]
+    #[case::rustlike_name("i32")]
+    #[case::leading_underscore("_uint32")]
+    #[case::trailing_underscore("uint32_")]
+    fn scalar_fail(#[case] item_str: &str) {
+        assert!(scalar_type.parse(item_str).is_err());
     }
 
-    #[test]
-    fn table_field_type_() {
+    #[rstest]
+    #[case::scalar("[uint32]", VectorItemType::Scalar(ScalarType::UInt32))]
+    #[case::string("[string]", VectorItemType::String)]
+    #[case::named_(
+        "[foo]",
+        VectorItemType::Named(NamedType::new("foo", DeclType::Struct))
+    )]
+    #[case::whitespace(
+        "[ \nfoo\n ]",
+        VectorItemType::Named(NamedType::new("foo", DeclType::Struct))
+    )]
+    fn vector_wrapped_pass(#[case] item_str: &str, #[case] output: VectorItemType) {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_structs(["foo"]);
 
-        let decls = HashMap::from([
-            ("", foo_decl.clone()),
-            ("namespace", foo_decl.clone()),
-            ("one.two.three", foo_decl.clone()),
-        ]);
+        let decls = HashMap::from([("", foo_decl.clone())]);
 
         state.extend_decls(decls);
 
-        let valid = [
-            (
-                "[uint32]",
-                TableFieldType::Vector(VectorItemType::Scalar(ScalarType::UInt32)),
-            ),
-            (
-                "[bool ]",
-                TableFieldType::Vector(VectorItemType::Scalar(ScalarType::Bool)),
-            ),
-            (
-                "[ foo]",
-                TableFieldType::Vector(VectorItemType::Named(NamedType::new(
-                    "foo",
-                    DeclType::Struct,
-                ))),
-            ),
-            (
-                "[double ]",
-                TableFieldType::Vector(VectorItemType::Scalar(ScalarType::Float64)),
-            ),
-            ("double", TableFieldType::Scalar(ScalarType::Float64)),
-            ("string", TableFieldType::String),
-            (
-                "namespace.foo",
-                TableFieldType::Named(NamedType::new("namespace.foo", DeclType::Struct)),
-            ),
-        ];
-
-        for (item_str, item) in valid {
-            let mut value = item_str;
-            assert_eq!(table_field_type(&state).parse_next(&mut value), Ok(item));
-        }
-
-        let invalid = ["[uint32", "[uint32 asd]", "invalid_type"];
-
-        for item in invalid {
-            let mut value = item;
-            assert!(table_field_type(&state).parse_next(&mut value).is_err());
-        }
+        assert_eq!(vector_type(&state).parse(item_str), Ok(output));
     }
 
-    #[test]
-    fn array() {
-        let mut state = ParserState::new();
+    #[rstest]
+    #[case::no_brackets("uint32")]
+    #[case::unclosed_bracket("[uint32")]
+    #[case::unopened_bracket("uint32]")]
+    #[case::extra_text("[uint32 asd]")]
+    fn vector_wrapped_fail(#[case] item_str: &str) {
+        let state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs(["foo"]);
-        foo_decl.add_tables(["bar"]);
-
-        let decls = HashMap::from([
-            ("", foo_decl.clone()),
-            ("namespace", foo_decl.clone()),
-            ("one.two.three", foo_decl.clone()),
-        ]);
-
-        state.extend_decls(decls);
-
-        let valid = [
-            (
-                "[uint32:5]",
-                Array {
-                    item_type: ArrayItemType::Scalar(ScalarType::UInt32),
-                    length: 5,
-                },
-            ),
-            (
-                "[ float :\n10 ]",
-                Array {
-                    item_type: ArrayItemType::Scalar(ScalarType::Float32),
-                    length: 10,
-                },
-            ),
-            (
-                "[ namespace.foo :\n1500000 ]",
-                Array {
-                    item_type: ArrayItemType::Named(NamedType::new(
-                        "namespace.foo",
-                        DeclType::Struct,
-                    )),
-                    length: 1_500_000,
-                },
-            ),
-        ];
-
-        for (item_str, item) in valid {
-            let mut value = item_str;
-            assert_eq!(array_type(&state).parse_next(&mut value), Ok(item));
-        }
-
-        let invalid = ["[uint32]", "[uint32:5", "[hello 5]", "uint32:5]", "[bar:3]"];
-
-        for item in invalid {
-            let mut value = item;
-            assert!(array_type(&state).parse_next(&mut value).is_err());
-        }
+        assert!(vector_type(&state).parse(item_str).is_err());
     }
 
-    #[test]
-    fn struct_field_type_() {
+    #[rstest]
+    #[case::vector(
+        "[uint32]",
+        TableFieldType::Vector(VectorItemType::Scalar(ScalarType::UInt32))
+    )]
+    #[case::scalar("double", TableFieldType::Scalar(ScalarType::Float64))]
+    #[case::string("string", TableFieldType::String)]
+    fn table_field_type_pass(#[case] item_str: &str, #[case] output: TableFieldType) {
+        let state = ParserState::new();
+
+        assert_eq!(table_field_type(&state).parse(item_str), Ok(output));
+    }
+
+    #[rstest]
+    #[case::unknown_type("fake_type")]
+    #[case::array("[uint32:3]")]
+    fn table_field_type_fail(#[case] item_str: &str) {
+        let state = ParserState::new();
+
+        assert!(table_field_type(&state).parse(item_str).is_err());
+    }
+
+    #[rstest]
+    #[case::scalar(
+        "[uint32:5]",
+        Array {
+            item_type: ArrayItemType::Scalar(ScalarType::UInt32),
+            length: 5,
+        },
+    )]
+    #[case::named(
+        "[Struct1:1500000]",
+        Array {
+            item_type: ArrayItemType::Named(NamedType::new(
+                "Struct1",
+                DeclType::Struct,
+            )),
+            length: 1_500_000,
+        },
+    )]
+    #[case::whitespace(
+        "[\n uint32 \n : \n 10 \n]",
+        Array {
+            item_type: ArrayItemType::Scalar(ScalarType::UInt32),
+            length: 10,
+        },
+    )]
+    fn array_pass(#[case] item_str: &str, #[case] output: Array) {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs(["foo"]);
-        foo_decl.add_tables(["bar"]);
+        foo_decl.add_structs(["Struct1"]);
 
-        let decls = HashMap::from([
-            ("", foo_decl.clone()),
-            ("namespace", foo_decl.clone()),
-            ("one.two.three", foo_decl.clone()),
-        ]);
+        let decls = HashMap::from([("", foo_decl.clone())]);
 
         state.extend_decls(decls);
 
-        let valid = [
-            (
-                "[uint32\n: \n 5]",
-                StructFieldType::Array(Array {
-                    item_type: ArrayItemType::Scalar(ScalarType::UInt32),
-                    length: 5,
-                }),
-            ),
-            ("float", StructFieldType::Scalar(ScalarType::Float32)),
-            (
-                "namespace.foo",
-                StructFieldType::Named(NamedType::new("namespace.foo", DeclType::Struct)),
-            ),
-        ];
+        assert_eq!(array_type(&state).parse(item_str), Ok(output));
+    }
 
-        for (item_str, item) in valid {
-            let mut value = item_str;
-            assert_eq!(struct_field_type(&state).parse_next(&mut value), Ok(item));
-        }
+    #[rstest]
+    #[case::vector_styled("[uint32]")]
+    #[case::missing_size("[uint32:]")]
+    #[case::unclosed_bracket("[uint32:5")]
+    #[case::unopened_bracket("uint32:5]")]
+    #[case::nonstruct_named("[Table1:5]")]
+    fn array_fail(#[case] item_str: &str) {
+        let mut state = ParserState::new();
 
-        let invalid = ["[uint32]", "[uint32:5", "bar"];
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_tables(["Table1"]);
 
-        for item in invalid {
-            let mut value = item;
-            assert!(struct_field_type(&state).parse_next(&mut value).is_err());
-        }
+        let decls = HashMap::from([("", foo_decl.clone())]);
+
+        state.extend_decls(decls);
+
+        assert!(array_type(&state).parse(item_str).is_err());
+    }
+
+    #[rstest]
+    #[case::scalar("uint32", StructFieldType::Scalar(ScalarType::UInt32))]
+    #[case::named(
+        "Struct1",
+        StructFieldType::Named(
+            NamedType {
+                ident: "Struct1",
+                decl_type: DeclType::Struct,
+            }
+        ),
+    )]
+    #[case::array(
+        "[uint32:5]",
+        StructFieldType::Array(Array {
+            item_type: ArrayItemType::Scalar(ScalarType::UInt32),
+            length: 5,
+        }),
+    )]
+    fn struct_field_type_pass(#[case] item_str: &str, #[case] output: StructFieldType) {
+        let mut state = ParserState::new();
+
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_structs(["Struct1"]);
+
+        let decls = HashMap::from([("", foo_decl.clone())]);
+
+        state.extend_decls(decls);
+
+        assert_eq!(struct_field_type(&state).parse(item_str), Ok(output));
+    }
+
+    #[rstest]
+    #[case::vector("[uint32]")]
+    #[case::string("string")]
+    #[case::nonstruct_named("Table1")]
+    fn struct_field_type_fail(#[case] item_str: &str) {
+        let mut state = ParserState::new();
+
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_tables(["Table1"]);
+
+        let decls = HashMap::from([("", foo_decl.clone())]);
+
+        state.extend_decls(decls);
+
+        assert!(struct_field_type(&state).parse(item_str).is_err());
     }
 }

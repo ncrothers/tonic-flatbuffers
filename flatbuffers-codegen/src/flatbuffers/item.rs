@@ -213,61 +213,78 @@ pub fn root_type<'a, 's: 'a>(
 mod tests {
     use std::collections::HashMap;
 
+    use rstest::rstest;
+
     use crate::parser::TypeDecls;
 
     use super::*;
 
-    #[test]
-    fn r#struct() {
+    #[rstest]
+    #[case::attribute("attribute \"testing\";", |x| matches!(x, Item::Attribute("testing")))]
+    #[case::file_identifier(
+        "file_identifier \"TEST\";",
+        |x| matches!(x, Item::FileIdentifier("TEST"))
+    )]
+    #[case::file_extension(
+        "file_extension \"ext\";",
+        |x| matches!(x, Item::FileExtension("ext"))
+    )]
+    #[case::include(
+        "include \"file.fbs\";",
+        |x| matches!(x, Item::Include("file.fbs"))
+    )]
+    #[case::root_type(
+        "root_type Table;",
+        |x| matches!(x, Item::RootType("Table"))
+    )]
+    #[case::namespace(
+        "namespace one.two.three;",
+        |x| matches!(x, Item::Namespace("one.two.three"))
+    )]
+    #[case::enum_(
+        "enum test:int {}",
+        |x| matches!(x, Item::Enum(_))
+    )]
+    #[case::struct_(
+        "struct test {}",
+        |x| matches!(x, Item::Struct(_))
+    )]
+    #[case::table(
+        "table test {}",
+        |x| matches!(x, Item::Table(_))
+    )]
+    #[case::union(
+        "union test {}",
+        |x| matches!(x, Item::Union(_))
+    )]
+    fn item_pass(
+        #[case] item_str: &'static str,
+        #[case] output: impl FnOnce(Item<'static>) -> bool,
+    ) {
         let mut state_ = ParserState::new();
         let mut decl = TypeDecls::new();
         decl.add_tables(["Table"]);
 
         state_.extend_decls(HashMap::from([("", decl)]));
 
-        let state = &mut state_;
+        let state = &state_;
 
-        assert_eq!(
-            item(state).parse("attribute \"testing\";"),
-            Ok(Item::Attribute("testing"))
-        );
-        assert!(matches!(
-            item(state).parse("enum test:int {}"),
-            Ok(Item::Enum(_))
-        ));
-        assert_eq!(
-            item(state).parse("file_identifier \"TEST\";"),
-            Ok(Item::FileIdentifier("TEST"))
-        );
-        assert!(item(state).parse("file_identifier \"TESTa\";").is_err());
-        assert!(item(state).parse("file_identifier \"TES\";").is_err());
-        assert_eq!(
-            item(state).parse("file_extension \"ext\";"),
-            Ok(Item::FileExtension("ext"))
-        );
-        assert_eq!(
-            item(state).parse("include \"file.fbs\";"),
-            Ok(Item::Include("file.fbs"))
-        );
-        assert_eq!(
-            item(state).parse("root_type Table;"),
-            Ok(Item::RootType("Table"))
-        );
-        assert!(matches!(
-            item(state).parse("struct test {}"),
-            Ok(Item::Struct(_))
-        ));
-        assert!(matches!(
-            item(state).parse("table test {}"),
-            Ok(Item::Table(_))
-        ));
-        assert!(matches!(
-            item(state).parse("union test {}"),
-            Ok(Item::Union(_))
-        ));
-        assert_eq!(
-            item(state).parse("namespace one.two.three;"),
-            Ok(Item::Namespace("one.two.three"))
-        );
+        let item = item(state).parse(item_str);
+        assert!(item.is_ok());
+        let item = item.unwrap();
+
+        assert!(output(item));
+
+        // assert!(item(state).parse("file_identifier \"TESTa\";").is_err());
+        // assert!(item(state).parse("file_identifier \"TES\";").is_err());
+    }
+
+    #[rstest]
+    #[case::file_identifier_long("file_identifier \"TESTa\";")]
+    #[case::file_identifier_short("file_identifier \"TES\";")]
+    fn item_fail(#[case] item_str: &str) {
+        let state = ParserState::new();
+
+        assert!(item(&state).parse(item_str).is_err());
     }
 }

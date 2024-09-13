@@ -1,5 +1,7 @@
 namespace example.service;
 
+attribute "custom_attr";
+
 table Request {
     foo:
     /// Comment goes here
@@ -9,7 +11,15 @@ table Request {
 
 table Response {
     foo:uint;
-    bar:string;
+    struct:string;
+}
+
+struct Struct1 {
+    foo:uint;
+}
+
+union Union {
+    Request,
 }
 
 root_type Request;
@@ -20,5 +30,5 @@ rpc_service HelloWorldStreaming {
     HelloStreamServer(Request): Response (streaming: "server");
     HelloStreamClient(Request): Response (streaming: "client");
     HelloStreamBidirectional(Request): Response (streaming: "bidi");
-    HelloStreamBidirectional(Request): Response (streaming: "bid");
 }
+// test

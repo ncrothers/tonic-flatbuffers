@@ -2,11 +2,11 @@ use std::collections::HashSet;
 
 use winnow::{
     ascii::digit1,
-    combinator::{cut_err, not, opt, separated, trace},
+    combinator::{alt, cut_err, not, opt, separated, trace},
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
     seq,
-    stream::{AsChar, Checkpoint, Stream},
-    token::{literal, take_till},
+    stream::{Checkpoint, Stream},
+    token::literal,
     Parser,
 };
 
@@ -252,11 +252,7 @@ fn parse_attribute<'a, 's: 'a>(
                 if let Some((_, _, value)) = opt(seq!(
                     literal(':'),
                     whitespace_and_comments_opt,
-                    take_till(1.., |c: char| {
-                        c.is_whitespace()
-                            || c.is_newline()
-                            || (c.is_ascii_punctuation() && c != '_')
-                    })
+                    alt((string_literal, digit1,))
                 ))
                 .parse_next(input)?
                 {
@@ -334,7 +330,7 @@ pub fn attribute_list<'a, 's: 'a>(
 
             whitespace_and_comments_opt(input)?;
 
-            literal(")").parse_next(input)?;
+            cut_err(literal(")")).parse_next(input)?;
 
             Ok(attrs)
         })
@@ -344,45 +340,40 @@ pub fn attribute_list<'a, 's: 'a>(
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
-    #[test]
-    fn attribute() {
-        let valid = [
-            ("id: 1", Attribute::Id(1)),
-            ("id:\n2", Attribute::Id(2)),
-            ("deprecated", Attribute::Deprecated),
-            (
-                "custom: hello",
-                Attribute::Custom {
-                    name: "custom",
-                    value: Some("hello"),
-                },
-            ),
-            (
-                "nested_flatbuffer: \"other_table\"",
-                Attribute::NestedFlatBuffer("other_table"),
-            ),
-            (
-                "custom",
-                Attribute::Custom {
-                    name: "custom",
-                    value: None,
-                },
-            ),
-        ];
-
+    #[rstest]
+    #[case::id("id: 1", Attribute::Id(1))]
+    #[case::id("id:\n2", Attribute::Id(2))]
+    #[case::deprecated("deprecated", Attribute::Deprecated)]
+    #[case::custom_str("custom: \"hello\"", Attribute::Custom {
+        name: "custom",
+        value: Some("hello"),
+    })]
+    #[case::custom_int("custom: 12", Attribute::Custom {
+        name: "custom",
+        value: Some("12"),
+    })]
+    #[case::custom("custom", Attribute::Custom {
+        name: "custom",
+        value: None,
+    })]
+    #[case::nested_flatbuffer(
+        "nested_flatbuffer: \"other_table\"",
+        Attribute::NestedFlatBuffer("other_table")
+    )]
+    fn single_attr_pass(#[case] item_str: &str, #[case] output: Attribute) {
         let state = ParserState::new();
 
-        for (item_str, item) in valid {
-            assert_eq!(
-                parse_attribute(&state, AttributeTarget::TableField)
-                    .parse(item_str)
-                    .inspect_err(|e| println!("{e}"))
-                    .map(|(attr, _)| attr),
-                Ok(item)
-            );
-        }
+        assert_eq!(
+            parse_attribute(&state, AttributeTarget::TableField)
+                .parse(item_str)
+                .inspect_err(|e| println!("{e}"))
+                .map(|(attr, _)| attr),
+            Ok(output)
+        );
 
         let invalid = [
             "id:",
@@ -397,27 +388,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn attribute_section() {
-        let valid = [
-            ("(id: 1)", vec![Attribute::Id(1)]),
-            ("(id:\n2)", vec![Attribute::Id(2)]),
-            (
-                "(deprecated, /// ignore me\n id: 1)",
-                vec![Attribute::Deprecated, Attribute::Id(1)],
-            ),
-        ];
-
+    #[rstest]
+    #[case::colon_no_value("id:")]
+    #[case::open_string_literal("nested_flatbuffer: \"not_closed")]
+    #[case::wrong_type("id: \"1\"")]
+    #[case::missing_value("bit_flags")]
+    fn single_attr_fail(#[case] item_str: &str) {
         let state = ParserState::new();
 
-        for (item_str, item) in valid {
-            assert_eq!(
-                attribute_list(&state, AttributeTarget::TableField)
-                    .parse(item_str)
-                    .map(|attrs| attrs.attrs),
-                Ok(item)
-            );
-        }
+        assert!(parse_attribute(&state, AttributeTarget::TableField)
+            .parse(item_str)
+            .inspect_err(|e| println!("{e}"))
+            .is_err());
+    }
+
+    #[rstest]
+    #[case::simple("(id: 1)", vec![Attribute::Id(1)])]
+    #[case::whitespace("(id \n:\n2)", vec![Attribute::Id(2)])]
+    #[case::comments("(deprecated, /// ignore me\n id: 1)", vec![Attribute::Deprecated, Attribute::Id(1)])]
+    fn attribute_section_pass(#[case] item_str: &str, #[case] output: Vec<Attribute>) {
+        let state = ParserState::new();
+
+        assert_eq!(
+            attribute_list(&state, AttributeTarget::TableField)
+                .parse(item_str)
+                .map(|attrs| attrs.attrs),
+            Ok(output)
+        );
 
         let invalid = ["id: 1", "(id: 1", "(id:1,)"];
 
@@ -425,5 +422,17 @@ mod tests {
             let attr = attribute_list(&state, AttributeTarget::TableField).parse(item);
             assert!(attr.is_err());
         }
+    }
+
+    #[rstest]
+    #[case::missing_parentheses("id: 1")]
+    #[case::unclosed_parentheses("(id: 1")]
+    #[case::trailing_comma("(id:1,)")]
+    fn attribute_section_fail(#[case] item_str: &str) {
+        let state = ParserState::new();
+
+        assert!(attribute_list(&state, AttributeTarget::TableField)
+            .parse(item_str)
+            .is_err());
     }
 }

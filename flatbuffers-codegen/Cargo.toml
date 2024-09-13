@@ -12,3 +12,7 @@ glob = "0.3.1"
 path-clean = "1.0.1"
 regex = "1.10.6"
 winnow = { version = "0.6.18" }
+
+[dev-dependencies]
+rstest = "0.22.0"
+serial_test = "3.1.1"

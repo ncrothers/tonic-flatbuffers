@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use winnow::{
     combinator::{cut_err, opt, repeat, trace},
-    error::{ContextError, StrContext, StrContextValue},
+    error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
+    stream::Stream,
     token::literal,
     Parser,
 };
@@ -65,16 +68,30 @@ fn rpc_method_parameter<'a, 's: 'a>(
 
 fn rpc_method<'a, 's: 'a>(
     state: &'a ParserState<'s>,
+    field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, RpcMethod<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("rpc_method", |input: &mut _| {
             let comments = whitespace_and_comments_opt(input)?;
+
+            let ident_chk = input.checkpoint();
             // Get the field ident
             let ident = ident
                 .context(StrContext::Expected(StrContextValue::Description(
                     "rpc_service method identifier",
                 )))
                 .parse_next(input)?;
+
+            if field_idents.contains(&ident) {
+                input.reset(&ident_chk);
+                return Err(ErrMode::Cut(ContextError::new().add_context(
+                    input,
+                    &ident_chk,
+                    StrContext::Label("; duplicate method name"),
+                )));
+            }
+
+            field_idents.insert(ident);
 
             whitespace_and_comments_opt(input)?;
 
@@ -143,8 +160,9 @@ pub fn rpc_service_item<'a, 's: 'a>(
             // added to the field
             whitespace_all(input)?;
 
+            let mut field_idents = HashSet::new();
             // Parse methods
-            let methods = repeat(0.., rpc_method(state)).parse_next(input)?;
+            let methods = repeat(0.., rpc_method(state, &mut field_idents)).parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
             cut_err(literal("}"))
