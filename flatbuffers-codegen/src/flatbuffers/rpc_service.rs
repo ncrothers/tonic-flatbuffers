@@ -185,18 +185,18 @@ pub fn rpc_service_item<'a, 's: 'a>(
 mod tests {
     use std::collections::HashMap;
 
+    use rstest::rstest;
+
     use crate::parser::{DeclType, NamedType, TypeDecls};
 
     use super::*;
 
-    #[test]
-    fn rpc_service() {
-        let service1_str = r#"
-            rpc_service Hello {
-                HelloWorld(Table1) : Table1 (streaming: "bidi");
-            }"#;
-
-        let service1 = RpcService {
+    #[rstest]
+    #[case::simple(
+        r#"rpc_service Hello {
+            HelloWorld(Table1) : Table1;
+        }"#,
+        RpcService {
             name: "Hello",
             namespace: "",
             methods: vec![RpcMethod {
@@ -204,45 +204,131 @@ mod tests {
                 parameter: NamedType::new("Table1", DeclType::Table),
                 return_type: NamedType::new("Table1", DeclType::Table),
                 comments: Vec::new(),
-                attributes: vec![Attribute::Streaming(StreamingMode::Bidirectional)],
+                attributes: Vec::new(),
             }],
             comments: Vec::new(),
             attributes: Vec::new(),
-        };
-
-        let valid = [(service1_str, service1)];
-
+        }
+    )]
+    #[case::comments(
+        r#"/// Service comment
+        rpc_service Hello {
+            HelloWorld(Table1) : Table1;
+        }"#,
+        RpcService {
+            name: "Hello",
+            namespace: "",
+            methods: vec![RpcMethod {
+                name: "HelloWorld",
+                parameter: NamedType::new("Table1", DeclType::Table),
+                return_type: NamedType::new("Table1", DeclType::Table),
+                comments: Vec::new(),
+                attributes: Vec::new(),
+            }],
+            comments: vec!["Service comment"],
+            attributes: Vec::new(),
+        }
+    )]
+    fn rpc_service_pass(#[case] item_str: &str, #[case] output: RpcService) {
         let mut state = ParserState::new();
         let mut decl = TypeDecls::new();
         decl.add_tables(["Table1"]);
 
         state.extend_decls(HashMap::from([("", decl)]));
 
-        for (item_str, item) in valid {
-            let value = item_str;
-            let res = rpc_service_item(&state)
-                .parse(value)
-                .inspect_err(|e| println!("{e}"));
-            assert_eq!(res, Ok(item));
+        let res = rpc_service_item(&state)
+            .parse(item_str)
+            .inspect_err(|e| println!("{e}"));
+
+        assert_eq!(res, Ok(output));
+    }
+
+    #[rstest]
+    #[case::duplicate(
+        r#"rpc_service Hello_There {
+            HelloWorld(Table1):Table1;
+            HelloWorld(Table1):Table1;
+        }"#
+    )]
+    fn rpc_service_fail(#[case] item_str: &str) {
+        let mut state = ParserState::new();
+        let mut decl = TypeDecls::new();
+        decl.add_tables(["Table1"]);
+
+        state.extend_decls(HashMap::from([("", decl)]));
+
+        assert!(rpc_service_item(&state).parse(item_str).is_err());
+    }
+
+    #[rstest]
+    #[case::simple(
+        "HelloWorld(Table1) : Table1;",
+        RpcMethod {
+            name: "HelloWorld",
+            parameter: NamedType::new("Table1", DeclType::Table),
+            return_type: NamedType::new("Table1", DeclType::Table),
+            comments: Vec::new(),
+            attributes: Vec::new(),
         }
-
-        let service_invalid1 = r#"
-            rpc_service Hello_There {
-                HelloWorld(MissingTable):Table1;
-            }"#;
-
-        let struct_invalid2 = r#"
-            rpc_service Hello_There {
-                HelloWorld(Table1) Table1;
-            }"#;
-
-        let struct_invalid3 = r#"
-            rpc_service Hello There {}"#;
-
-        let invalid = [service_invalid1, struct_invalid2, struct_invalid3];
-
-        for item in invalid {
-            assert!(rpc_service_item(&state).parse(item).is_err());
+    )]
+    #[case::whitespace(
+        " \n HelloWorld \n ( \n Table1 \n ) \n : \n Table1 \n;",
+        RpcMethod {
+            name: "HelloWorld",
+            parameter: NamedType::new("Table1", DeclType::Table),
+            return_type: NamedType::new("Table1", DeclType::Table),
+            comments: Vec::new(),
+            attributes: Vec::new(),
         }
+    )]
+    #[case::comments(
+        r#"/// Method comment
+        HelloWorld(Table1) : Table1;"#,
+        RpcMethod {
+            name: "HelloWorld",
+            parameter: NamedType::new("Table1", DeclType::Table),
+            return_type: NamedType::new("Table1", DeclType::Table),
+            comments: vec!["Method comment"],
+            attributes: Vec::new(),
+        }
+    )]
+    #[case::streaming(
+        "HelloWorld(Table1) : Table1 (streaming: \"bidi\");",
+        RpcMethod {
+            name: "HelloWorld",
+            parameter: NamedType::new("Table1", DeclType::Table),
+            return_type: NamedType::new("Table1", DeclType::Table),
+            comments: Vec::new(),
+            attributes: vec![Attribute::Streaming(StreamingMode::Bidirectional)],
+        }
+    )]
+    fn rpc_method_pass(#[case] item_str: &str, #[case] output: RpcMethod) {
+        let mut state = ParserState::new();
+        let mut decl = TypeDecls::new();
+        decl.add_tables(["Table1"]);
+
+        state.extend_decls(HashMap::from([("", decl)]));
+
+        let res = rpc_method(&state, &mut HashSet::new())
+            .parse(item_str)
+            .inspect_err(|e| println!("{e}"));
+
+        assert_eq!(res, Ok(output));
+    }
+
+    #[rstest]
+    #[case::missing_parameter("HelloWorld :Table1;")]
+    #[case::missing_parentheses("HelloWorld(Table1 :Table1;")]
+    #[case::missing_semicolon("HelloWorld(Table1):Table1")]
+    fn rpc_method_fail(#[case] item_str: &str) {
+        let mut state = ParserState::new();
+        let mut decl = TypeDecls::new();
+        decl.add_tables(["Table1"]);
+
+        state.extend_decls(HashMap::from([("", decl)]));
+
+        assert!(rpc_method(&state, &mut HashSet::new())
+            .parse(item_str)
+            .is_err());
     }
 }

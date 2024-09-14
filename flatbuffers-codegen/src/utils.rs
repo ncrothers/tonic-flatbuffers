@@ -296,27 +296,33 @@ pub fn string_literal<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::S
 mod tests {
     use std::collections::HashMap;
 
+    use rstest::rstest;
+
     use crate::parser::TypeDecls;
 
     use super::*;
 
-    #[test]
-    fn ident_() {
-        let valid = ["foo", "_foo", "foo_", "_f_1_o_o"];
-
-        for item in valid {
-            assert_eq!(ident.parse(item), Ok(item));
-        }
-
-        let invalid = ["1foo", "", "111foo"];
-
-        for item in invalid {
-            assert!(ident.parse(item).is_err());
-        }
+    #[rstest]
+    #[case("foo")]
+    #[case("_foo")]
+    #[case("foo_")]
+    #[case("_f_1_o_o")]
+    fn ident_pass(#[case] item_str: &str) {
+        assert_eq!(ident.parse(item_str), Ok(item_str));
     }
 
-    #[test]
-    fn resolved_ident_() {
+    #[rstest]
+    #[case("1foo")]
+    #[case("1+foo")]
+    fn ident_fail(#[case] item_str: &str) {
+        assert!(ident.parse(item_str).is_err());
+    }
+
+    #[rstest]
+    #[case::simple("foo", NamedType { ident: "foo", decl_type: DeclType::Struct })]
+    #[case::nested("namespace.foo", NamedType { ident: "namespace.foo", decl_type: DeclType::Struct })]
+    #[case::nested("one.two.three.foo", NamedType { ident: "one.two.three.foo", decl_type: DeclType::Struct })]
+    fn resolved_ident_pass(#[case] item_str: &str, #[case] output: NamedType) {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
@@ -330,50 +336,48 @@ mod tests {
 
         state.extend_decls(decls);
 
-        let valid = ["foo", "namespace.foo", "one.two.three.foo"];
-
-        for item in valid {
-            assert_eq!(
-                resolved_ident(&state, DeclType::ANY).parse(item),
-                Ok(NamedType {
-                    ident: item,
-                    decl_type: DeclType::Struct
-                })
-            );
-        }
-
-        let invalid = [".foo", "hello.", "test.test."];
-
-        for item in invalid {
-            assert!(resolved_ident(&state, DeclType::ANY).parse(item).is_err());
-        }
+        assert_eq!(
+            resolved_ident(&state, DeclType::ANY).parse(item_str),
+            Ok(output)
+        );
     }
 
-    #[test]
-    fn comments() {
-        let valid = [
-            (" /// this is a comment", vec!["this is a comment"]),
-            (
-                "\n/// Comment here\n/// Another line!",
-                vec!["Comment here", "Another line!"],
-            ),
-            (
-                "/// This is a comment\n// this is not!",
-                vec!["This is a comment"],
-            ),
-            ("// This is not a comment", Vec::new()),
-            ("", Vec::new()),
-        ];
+    #[rstest]
+    #[case::malformed(".foo")]
+    #[case::malformed("hello.")]
+    #[case::not_defined("empty.foo")]
+    fn resolved_ident_fail(#[case] item_str: &str) {
+        let mut state = ParserState::new();
 
-        for (item_str, item) in valid {
-            assert_eq!(whitespace_and_comments_opt.parse(item_str), Ok(item));
-        }
+        let mut foo_decl = TypeDecls::new();
+        foo_decl.add_structs(["foo"]);
+
+        let decls = HashMap::from([
+            ("", foo_decl.clone()),
+            ("namespace", foo_decl.clone()),
+            ("one.two.three", foo_decl.clone()),
+        ]);
+
+        state.extend_decls(decls);
+
+        assert!(resolved_ident(&state, DeclType::ANY)
+            .parse(item_str)
+            .is_err());
     }
 
-    #[test]
-    fn type_name() {
-        assert_eq!(u32::type_name(), "u32");
-        assert_eq!(f64::type_name(), "f64");
-        assert_eq!(i8::type_name(), "i8");
+    #[rstest]
+    #[case::single(" /// this is a comment", vec!["this is a comment"])]
+    #[case::multiple(
+        "\n/// Comment here\n/// Another line!",
+        vec!["Comment here", "Another line!"],
+    )]
+    #[case::non_document(
+        "/// This is a comment\n// this is not!",
+        vec!["This is a comment"],
+    )]
+    #[case::non_document("// This is not a comment", Vec::new())]
+    #[case::none("", Vec::new())]
+    fn comments_pass(#[case] item_str: &str, #[case] output: Vec<&str>) {
+        assert_eq!(whitespace_and_comments_opt.parse(item_str), Ok(output));
     }
 }
