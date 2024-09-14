@@ -201,8 +201,8 @@ mod tests {
             namespace: "",
             methods: vec![RpcMethod {
                 name: "HelloWorld",
-                parameter: NamedType::new("Table1", DeclType::Table),
-                return_type: NamedType::new("Table1", DeclType::Table),
+                parameter: NamedType::new("Table1", "", DeclType::Table),
+                return_type: NamedType::new("Table1", "", DeclType::Table),
                 comments: Vec::new(),
                 attributes: Vec::new(),
             }],
@@ -220,8 +220,8 @@ mod tests {
             namespace: "",
             methods: vec![RpcMethod {
                 name: "HelloWorld",
-                parameter: NamedType::new("Table1", DeclType::Table),
-                return_type: NamedType::new("Table1", DeclType::Table),
+                parameter: NamedType::new("Table1", "", DeclType::Table),
+                return_type: NamedType::new("Table1", "", DeclType::Table),
                 comments: Vec::new(),
                 attributes: Vec::new(),
             }],
@@ -265,8 +265,8 @@ mod tests {
         "HelloWorld(Table1) : Table1;",
         RpcMethod {
             name: "HelloWorld",
-            parameter: NamedType::new("Table1", DeclType::Table),
-            return_type: NamedType::new("Table1", DeclType::Table),
+            parameter: NamedType::new("Table1", "", DeclType::Table),
+            return_type: NamedType::new("Table1", "", DeclType::Table),
             comments: Vec::new(),
             attributes: Vec::new(),
         }
@@ -275,8 +275,8 @@ mod tests {
         " \n HelloWorld \n ( \n Table1 \n ) \n : \n Table1 \n;",
         RpcMethod {
             name: "HelloWorld",
-            parameter: NamedType::new("Table1", DeclType::Table),
-            return_type: NamedType::new("Table1", DeclType::Table),
+            parameter: NamedType::new("Table1", "", DeclType::Table),
+            return_type: NamedType::new("Table1", "", DeclType::Table),
             comments: Vec::new(),
             attributes: Vec::new(),
         }
@@ -286,8 +286,8 @@ mod tests {
         HelloWorld(Table1) : Table1;"#,
         RpcMethod {
             name: "HelloWorld",
-            parameter: NamedType::new("Table1", DeclType::Table),
-            return_type: NamedType::new("Table1", DeclType::Table),
+            parameter: NamedType::new("Table1", "", DeclType::Table),
+            return_type: NamedType::new("Table1", "", DeclType::Table),
             comments: vec!["Method comment"],
             attributes: Vec::new(),
         }
@@ -296,8 +296,8 @@ mod tests {
         "HelloWorld(Table1) : Table1 (streaming: \"bidi\");",
         RpcMethod {
             name: "HelloWorld",
-            parameter: NamedType::new("Table1", DeclType::Table),
-            return_type: NamedType::new("Table1", DeclType::Table),
+            parameter: NamedType::new("Table1", "", DeclType::Table),
+            return_type: NamedType::new("Table1", "", DeclType::Table),
             comments: Vec::new(),
             attributes: vec![Attribute::Streaming(StreamingMode::Bidirectional)],
         }

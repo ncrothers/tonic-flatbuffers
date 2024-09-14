@@ -355,11 +355,11 @@ mod tests {
     #[case::string("[string]", VectorItemType::String)]
     #[case::named_(
         "[foo]",
-        VectorItemType::Named(NamedType::new("foo", DeclType::Struct))
+        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct))
     )]
     #[case::whitespace(
         "[ \nfoo\n ]",
-        VectorItemType::Named(NamedType::new("foo", DeclType::Struct))
+        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct))
     )]
     fn vector_wrapped_pass(#[case] item_str: &str, #[case] output: VectorItemType) {
         let mut state = ParserState::new();
@@ -420,6 +420,7 @@ mod tests {
         Array {
             item_type: ArrayItemType::Named(NamedType::new(
                 "Struct1",
+                "",
                 DeclType::Struct,
             )),
             length: 1_500_000,
@@ -471,6 +472,7 @@ mod tests {
         StructFieldType::Named(
             NamedType {
                 ident: "Struct1",
+                namespace: "",
                 decl_type: DeclType::Struct,
             }
         ),

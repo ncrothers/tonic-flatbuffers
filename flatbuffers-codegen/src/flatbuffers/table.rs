@@ -220,7 +220,7 @@ pub fn table_item<'a, 's: 'a>(
                                     if let Attribute::Id(field_id) = attr {
                                         has_id = true;
                                         // A union takes up 2 spots, so its index should be i+1
-                                        if matches!(field.field_type, TableFieldType::Named(NamedType { ident: _, decl_type: DeclType::Union })) {
+                                        if matches!(field.field_type, TableFieldType::Named(NamedType { ident: _, namespace: _, decl_type: DeclType::Union })) {
                                             if *field_id == 0 {
                                                 err!(chk, "id; union ids can only be 1 at the lowest");
                                             }

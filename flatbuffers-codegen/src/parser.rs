@@ -4,7 +4,7 @@ use std::{
 };
 
 use winnow::{
-    combinator::{alt, cut_err, repeat, rest, trace},
+    combinator::{alt, repeat, rest, trace},
     token::take_until,
     PResult, Parser,
 };
@@ -26,12 +26,17 @@ impl DeclType {
 #[derive(Debug, PartialEq)]
 pub struct NamedType<'a> {
     pub ident: &'a str,
+    pub namespace: &'a str,
     pub decl_type: DeclType,
 }
 
 impl<'a> NamedType<'a> {
-    pub fn new(ident: &'a str, decl_type: DeclType) -> Self {
-        Self { ident, decl_type }
+    pub fn new(ident: &'a str, namespace: &'a str, decl_type: DeclType) -> Self {
+        Self {
+            ident,
+            namespace,
+            decl_type,
+        }
     }
 }
 
@@ -76,30 +81,30 @@ impl<'a> ParserState<'a> {
         ns: &str,
         ident: &str,
         decl_types: &[DeclType],
-    ) -> Option<DeclType> {
+    ) -> Option<NamedType<'a>> {
         // Try to match namespace
-        if let Some(decls) = self.namespace_decls.get(ns) {
+        if let Some((ns, decls)) = self.namespace_decls.get_key_value(ns) {
             // Try to match against all the provided types
             for ty in decl_types {
                 match ty {
                     DeclType::Enum => {
-                        if decls.enums.contains(ident) {
-                            return Some(DeclType::Enum);
+                        if let Some(ident) = decls.enums.get(ident) {
+                            return Some(NamedType::new(ident, ns, DeclType::Enum));
                         }
                     }
                     DeclType::Struct => {
-                        if decls.structs.contains(ident) {
-                            return Some(DeclType::Struct);
+                        if let Some(ident) = decls.structs.get(ident) {
+                            return Some(NamedType::new(ident, ns, DeclType::Struct));
                         }
                     }
                     DeclType::Table => {
-                        if decls.tables.contains(ident) {
-                            return Some(DeclType::Table);
+                        if let Some(ident) = decls.tables.get(ident) {
+                            return Some(NamedType::new(ident, ns, DeclType::Table));
                         }
                     }
                     DeclType::Union => {
-                        if decls.unions.contains(ident) {
-                            return Some(DeclType::Union);
+                        if let Some(ident) = decls.unions.get(ident) {
+                            return Some(NamedType::new(ident, ns, DeclType::Union));
                         }
                     }
                 };
@@ -119,7 +124,7 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    pub fn resolve_any(&self, ident: &str, ty: &[DeclType]) -> Option<DeclType> {
+    pub fn resolve_any(&self, ident: &str, ty: &[DeclType]) -> Option<NamedType<'a>> {
         let (ns, ident) = ident.rsplit_once('.').unwrap_or(("", ident));
 
         self.resolve_ident_recursive(ns, ident, ty)

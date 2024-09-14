@@ -166,15 +166,9 @@ pub fn resolved_ident<'a, 's: 'a>(
             let ident = cut_err(separated(1.., ident, ".").map(|()| ()).take().verify_map(
                 |ident| {
                     // Try the ident literally, then prepend the cur_namespace
-                    state
-                        .resolve_any(ident, decl_types)
-                        .or_else(|| {
-                            state.resolve_any(
-                                &format!("{}.{}", state.namespace(), ident),
-                                decl_types,
-                            )
-                        })
-                        .map(|decl_type| NamedType { ident, decl_type })
+                    state.resolve_any(ident, decl_types).or_else(|| {
+                        state.resolve_any(&format!("{}.{}", state.namespace(), ident), decl_types)
+                    })
                 },
             ))
             .context(StrContext::Label("type"))
@@ -319,9 +313,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case::simple("foo", NamedType { ident: "foo", decl_type: DeclType::Struct })]
-    #[case::nested("namespace.foo", NamedType { ident: "namespace.foo", decl_type: DeclType::Struct })]
-    #[case::nested("one.two.three.foo", NamedType { ident: "one.two.three.foo", decl_type: DeclType::Struct })]
+    #[case::simple("foo", NamedType { ident: "foo", namespace: "", decl_type: DeclType::Struct })]
+    #[case::nested("namespace.foo", NamedType { ident: "foo", namespace: "namespace", decl_type: DeclType::Struct })]
+    #[case::nested("one.two.three.foo", NamedType { ident: "foo", namespace: "one.two.three",decl_type: DeclType::Struct })]
     fn resolved_ident_pass(#[case] item_str: &str, #[case] output: NamedType) {
         let mut state = ParserState::new();
 
