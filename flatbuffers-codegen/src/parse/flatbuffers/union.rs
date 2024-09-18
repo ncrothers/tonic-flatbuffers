@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, ParserState},
-    utils::{ident, resolved_ident, whitespace_and_comments_opt},
+    utils::{ident, resolved_ident, whitespace_and_comments_opt, Namespace},
 };
 
 use super::attributes::{attribute_list, Attribute, AttributeTarget};
@@ -28,7 +28,7 @@ pub struct UnionVariant<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Union<'a> {
     name: &'a str,
-    namespace: &'a str,
+    namespace: Namespace<'a>,
     variants: Vec<UnionVariant<'a>>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
@@ -171,7 +171,7 @@ mod tests {
         }"#,
         Union {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
@@ -198,7 +198,7 @@ mod tests {
         }"#,
         Union {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
@@ -224,7 +224,7 @@ mod tests {
         }"#,
         Union {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
@@ -250,7 +250,7 @@ mod tests {
         }"#,
         Union {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             variants: vec![
                 UnionVariant {
                     name: "Variant1",
@@ -274,7 +274,7 @@ mod tests {
         let mut decl = TypeDecls::new();
         decl.add_tables(["Variant1", "Variant2", "Variant3"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        state.extend_decls(HashMap::from([("".into(), decl)]));
 
         assert_eq!(union_item(&state).parse(item_str), Ok(output));
 
@@ -330,7 +330,7 @@ mod tests {
         let mut decl = TypeDecls::new();
         decl.add_tables(["Variant1", "Variant2", "Variant3"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        state.extend_decls(HashMap::from([("".into(), decl)]));
 
         assert!(union_item(&state).parse(item_str).is_err());
     }

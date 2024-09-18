@@ -402,7 +402,7 @@ mod tests {
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_structs(["foo"]);
 
-        let decls = HashMap::from([("", foo_decl.clone())]);
+        let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
         state.extend_decls(decls);
 
@@ -474,7 +474,7 @@ mod tests {
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_structs(["Struct1"]);
 
-        let decls = HashMap::from([("", foo_decl.clone())]);
+        let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
         state.extend_decls(decls);
 
@@ -493,7 +493,7 @@ mod tests {
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_tables(["Table1"]);
 
-        let decls = HashMap::from([("", foo_decl.clone())]);
+        let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
         state.extend_decls(decls);
 
@@ -507,7 +507,7 @@ mod tests {
         StructFieldType::Named(
             NamedType {
                 ident: "Struct1",
-                namespace: "",
+                namespace: "".into(),
                 decl_type: DeclType::Struct,
             }
         ),
@@ -525,7 +525,7 @@ mod tests {
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_structs(["Struct1"]);
 
-        let decls = HashMap::from([("", foo_decl.clone())]);
+        let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
         state.extend_decls(decls);
 
@@ -542,7 +542,7 @@ mod tests {
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_tables(["Table1"]);
 
-        let decls = HashMap::from([("", foo_decl.clone())]);
+        let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
         state.extend_decls(decls);
 

@@ -9,7 +9,10 @@ use winnow::{
     PResult, Parser,
 };
 
-use super::{flatbuffers::item::{item, namespace, Item}, utils::{ByteSize, Namespace}};
+use super::{
+    flatbuffers::item::{item, namespace, Item},
+    utils::{ByteSize, Namespace, NamespaceWrapped},
+};
 
 #[derive(Debug, PartialEq)]
 pub enum DeclType {
@@ -20,6 +23,7 @@ pub enum DeclType {
 }
 
 impl DeclType {
+    /// Slice of all [`DeclType`] variants. Used to match any [`DeclType`] when resolving an identifier
     pub const ANY: &'static [Self] = &[Self::Enum, Self::Struct, Self::Table, Self::Union];
 }
 
@@ -31,10 +35,13 @@ pub struct NamedType<'a> {
 }
 
 impl<'a> NamedType<'a> {
-    pub fn new(ident: &'a str, namespace: Namespace<'a>, decl_type: DeclType) -> Self {
+    pub fn new<N>(ident: &'a str, namespace: N, decl_type: DeclType) -> Self
+    where
+        N: Into<Namespace<'a>> + 'a,
+    {
         Self {
             ident,
-            namespace,
+            namespace: namespace.into(),
             decl_type,
         }
     }
@@ -49,13 +56,13 @@ impl<'a> ByteSize for NamedType<'a> {
 #[derive(Debug)]
 pub struct ParserState<'a> {
     cur_namespace: RefCell<Namespace<'a>>,
-    namespace_decls: HashMap<Namespace<'a>, TypeDecls<'a>>,
+    namespace_decls: HashMap<NamespaceWrapped<'a>, TypeDecls<'a>>,
 }
 
 impl<'a> ParserState<'a> {
     pub fn new() -> Self {
         Self {
-            cur_namespace: RefCell::new(Namespace::new("")),
+            cur_namespace: RefCell::new(Namespace::from("")),
             namespace_decls: HashMap::new(),
         }
     }
@@ -70,6 +77,7 @@ impl<'a> ParserState<'a> {
 
     pub fn extend_decls(&mut self, decls: HashMap<Namespace<'a>, TypeDecls<'a>>) {
         for (ns, decls) in decls {
+            let ns = NamespaceWrapped(ns);
             self.namespace_decls
                 .entry(ns)
                 .and_modify(|existing| {
@@ -84,7 +92,7 @@ impl<'a> ParserState<'a> {
 
     fn resolve_ident_recursive(
         &self,
-        ns: &Namespace,
+        ns: &Namespace<'_>,
         ident: &str,
         decl_types: &[DeclType],
     ) -> Option<NamedType<'a>> {
@@ -95,29 +103,29 @@ impl<'a> ParserState<'a> {
                 match ty {
                     DeclType::Enum => {
                         if let Some(ident) = decls.enums.get(ident) {
-                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Enum));
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Enum));
                         }
                     }
                     DeclType::Struct => {
                         if let Some(ident) = decls.structs.get(ident) {
-                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Struct));
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Struct));
                         }
                     }
                     DeclType::Table => {
                         if let Some(ident) = decls.tables.get(ident) {
-                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Table));
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Table));
                         }
                     }
                     DeclType::Union => {
                         if let Some(ident) = decls.unions.get(ident) {
-                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Union));
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Union));
                         }
                     }
                 };
             }
 
             // When no namespace left to check, we can return
-            if !ns.raw.is_empty() {
+            if !ns.0.raw.is_empty() {
                 return None;
             }
         }
@@ -130,7 +138,7 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    pub fn resolve_any(&self, ident: &'a str, ty: &[DeclType]) -> Option<NamedType<'a>> {
+    pub fn resolve_any(&self, ident: &str, ty: &[DeclType]) -> Option<NamedType<'a>> {
         let (ns, ident) = ident.rsplit_once('.').unwrap_or(("", ident));
 
         self.resolve_ident_recursive(&Namespace::new_raw(ns), ident, ty)
@@ -196,7 +204,7 @@ pub fn collect_includes(file: &str) -> Vec<&str> {
 
 pub fn parse_file<'a>(file: &'a str, state: &ParserState<'a>) -> anyhow::Result<Vec<Item<'a>>> {
     // Reset the current namespace
-    *state.cur_namespace.borrow_mut() = Namespace::new("");
+    *state.cur_namespace.borrow_mut() = Namespace::default();
 
     trace("parse_file", repeat(0.., item(state)))
         .parse(file)

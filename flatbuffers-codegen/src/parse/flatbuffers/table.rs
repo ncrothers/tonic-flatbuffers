@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, NamedType, ParserState},
-    utils::{default_value, ident, whitespace_all, whitespace_and_comments_opt},
+    utils::{default_value, ident, whitespace_all, whitespace_and_comments_opt, Namespace},
 };
 
 use super::{
@@ -41,7 +41,7 @@ impl<'a> PartialEq for TableField<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Table<'a> {
     name: &'a str,
-    namespace: &'a str,
+    namespace: Namespace<'a>,
     fields: Vec<TableField<'a>>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
@@ -307,7 +307,7 @@ mod tests {
         }"#,
         Table {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             fields: vec![TableField {
                 name: "foo",
                 field_type: TableFieldType::Scalar(ScalarType::UInt32),
@@ -329,7 +329,7 @@ mod tests {
         }"#,
         Table {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             fields: vec![TableField {
                 name: "foo",
                 field_type: TableFieldType::Scalar(ScalarType::UInt32),
@@ -348,7 +348,7 @@ mod tests {
         }"#,
         Table {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             fields: vec![TableField {
                 name: "foo",
                 field_type: TableFieldType::Scalar(ScalarType::UInt32),
@@ -463,7 +463,7 @@ mod tests {
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_tables(["Table1"]);
 
-        let decls = HashMap::from([("", foo_decl.clone())]);
+        let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
         state.extend_decls(decls);
 

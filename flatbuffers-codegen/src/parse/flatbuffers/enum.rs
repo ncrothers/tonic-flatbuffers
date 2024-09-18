@@ -11,7 +11,7 @@ use winnow::{
 use crate::parse::{
     flatbuffers::primitives::scalar_type,
     parser::ParserState,
-    utils::{ident, whitespace_and_comments_opt, TypeName},
+    utils::{ident, whitespace_and_comments_opt, Namespace, TypeName},
 };
 
 use super::{
@@ -50,7 +50,7 @@ pub enum EnumData<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Enum<'a> {
     name: &'a str,
-    namespace: &'a str,
+    namespace: Namespace<'a>,
     variants: EnumData<'a>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
@@ -271,7 +271,7 @@ mod tests {
         }"#,
         Enum {
             name: "Hello",
-            namespace: "",
+            namespace: "".into(),
             variants: EnumData::UInt32(vec![
                 EnumVariant {
                     name: "Variant1",
@@ -306,7 +306,7 @@ mod tests {
         }"#,
         Enum {
             name: "Hello_There",
-            namespace: "",
+            namespace: "".into(),
             variants: EnumData::Int32(vec![
                 EnumVariant {
                     name: "Variant1",
@@ -332,7 +332,7 @@ mod tests {
         }"#,
         Enum {
             name: "Hello_There",
-            namespace: "",
+            namespace: "".into(),
             variants: EnumData::Int32(vec![
                 EnumVariant {
                     name: "Variant1",
@@ -358,7 +358,7 @@ mod tests {
         }"#,
         Enum {
             name: "Hello_There",
-            namespace: "",
+            namespace: "".into(),
             variants: EnumData::Int32(vec![
                 EnumVariant {
                     name: "Variant1",

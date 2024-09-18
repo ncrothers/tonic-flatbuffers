@@ -9,7 +9,7 @@ use crate::parse::{
     parser::{DeclType, ParserState},
     utils::{
         ident, resolved_ident, string_literal, whitespace_all, whitespace_and_comments_opt,
-        whitespace_and_comments_req,
+        whitespace_and_comments_req, Namespace,
     },
 };
 
@@ -29,7 +29,7 @@ pub enum Item<'a> {
     FileExtension(&'a str),
     FileIdentifier(&'a str),
     Include(&'a str),
-    Namespace(&'a str),
+    Namespace(Namespace<'a>),
     RpcService(RpcService<'a>),
     RootType(&'a str),
     Struct(Struct<'a>),
@@ -162,7 +162,7 @@ pub fn include<'a, 's: 'a>(
 
 pub fn namespace<'a, 's: 'a>(
     state: &'a ParserState<'s>,
-) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
+) -> impl Parser<&'s str, Namespace<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("namespace", |input: &mut _| {
             whitespace_and_comments_opt(input)?;
@@ -175,10 +175,12 @@ pub fn namespace<'a, 's: 'a>(
                 .take()
                 .parse_next(input)?;
 
+            let namespace = Namespace::from(namespace);
+
             whitespace_and_comments_opt(input)?;
             literal(";").parse_next(input)?;
 
-            state.set_namespace(namespace);
+            state.set_namespace(namespace.clone());
 
             Ok(namespace)
         })
@@ -239,7 +241,7 @@ mod tests {
     )]
     #[case::namespace(
         "namespace one.two.three;",
-        |x| matches!(x, Item::Namespace("one.two.three"))
+        |x| matches!(x, Item::Namespace(Namespace { raw, components }) if raw == "one.two.three" && components == vec!["one", "two", "three"])
     )]
     #[case::enum_(
         "enum test:int {}",
@@ -265,7 +267,7 @@ mod tests {
         let mut decl = TypeDecls::new();
         decl.add_tables(["Table"]);
 
-        state_.extend_decls(HashMap::from([("", decl)]));
+        state_.extend_decls(HashMap::from([("".into(), decl)]));
 
         let state = &state_;
 

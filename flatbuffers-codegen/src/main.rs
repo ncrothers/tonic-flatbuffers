@@ -3,9 +3,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use flatbuffers_codegen::{generate::FlatbuffersGenerator, parse::{flatbuffers::item::Item, parser::{
-    collect_includes, get_namespaced_decls, parse_file, ParserState,
-}}};
+use flatbuffers_codegen::{
+    generate::FlatbuffersGenerator,
+    parse::{
+        flatbuffers::item::Item,
+        parser::{collect_includes, get_namespaced_decls, parse_file, ParserState},
+    },
+};
 
 /// Converts a relative path into absolute
 pub fn absolute<P: AsRef<Path>>(path: P) -> std::io::Result<PathBuf> {
@@ -111,7 +115,7 @@ fn main() {
 
         println!("Items found:");
         println!("{items:#?}");
-        
+
         for item in &items {
             if let Item::Struct(item) = item {
                 let tokens = Dummy.generate_struct(item);

@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::ParserState,
-    utils::{ident, whitespace_all, whitespace_and_comments_opt, ByteSize},
+    utils::{ident, whitespace_all, whitespace_and_comments_opt, ByteSize, Namespace},
 };
 
 use super::{
@@ -29,7 +29,7 @@ pub struct StructField<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Struct<'a> {
     pub name: &'a str,
-    pub namespace: &'a str,
+    pub namespace: Namespace<'a>,
     pub fields: Vec<StructField<'a>>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
@@ -37,12 +37,7 @@ pub struct Struct<'a> {
 
 impl<'a> ByteSize for Struct<'a> {
     fn size(&self) -> usize {
-        self.fields
-            .iter()
-            .map(|field| {
-                field.size()
-            })
-            .sum()
+        self.fields.iter().map(|field| field.size()).sum()
     }
 }
 
@@ -175,7 +170,7 @@ mod tests {
         }"#,
         Struct {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             fields: vec![StructField {
                 name: "foo",
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
@@ -195,7 +190,7 @@ mod tests {
         }"#,
         Struct {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             fields: vec![StructField {
                 name: "foo",
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
@@ -212,7 +207,7 @@ mod tests {
         }"#,
         Struct {
             name: "Hello",
-            namespace: "",
+            namespace: Namespace::default(),
             fields: vec![StructField {
                 name: "foo",
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
@@ -313,7 +308,7 @@ mod tests {
         let mut foo_decl = TypeDecls::new();
         foo_decl.add_tables(["Table1"]);
 
-        let decls = HashMap::from([("", foo_decl.clone())]);
+        let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
         state.extend_decls(decls);
 

@@ -34,25 +34,21 @@ impl_typename!(i8, u8, i16, u16, i32, u32, i64, u64, f32, f64);
 
 /// Wrapper around a namespace that stores both the raw and split namespace
 /// for easy access to the components
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Namespace<'a> {
     pub raw: &'a str,
     pub components: Vec<&'a str>,
 }
 
-impl<'a> Namespace<'a> {
-    pub fn new(ns: &'a str) -> Self {
-        let components = if ns.is_empty() {
-            // If the namespace is empty (root namespace), no components
-            Vec::new()
-        } else {
-            ns.split('.').collect()
-        };
+/// Wrapper around [`Namespace`] that's only used in the `HashMap`s that store
+/// the already-parsed items under each namespace. You should never have to
+/// interact with this object directly.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct NamespaceWrapped<'a>(pub(crate) Namespace<'a>);
 
-        Self {
-            raw: ns,
-            components,
-        }
+impl<'a> Namespace<'a> {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Creates a [`Namespace`] with _only_ the `raw` field. This should
@@ -62,6 +58,23 @@ impl<'a> Namespace<'a> {
         Self {
             raw: ns,
             components: Vec::new(),
+        }
+    }
+}
+
+impl<'a> From<&'a str> for Namespace<'a> {
+    /// Creates a namespace from a string, including splitting it into components.
+    fn from(value: &'a str) -> Self {
+        let components = if value.is_empty() {
+            // If the namespace is empty (root namespace), no components
+            Vec::new()
+        } else {
+            value.split('.').collect()
+        };
+
+        Self {
+            raw: value,
+            components,
         }
     }
 }
@@ -85,6 +98,12 @@ impl std::fmt::Display for Namespace<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Use the raw's implementation
         self.raw.fmt(f)
+    }
+}
+
+impl<'a: 'b, 'b> std::borrow::Borrow<Namespace<'b>> for NamespaceWrapped<'a> {
+    fn borrow(&self) -> &Namespace<'b> {
+        &self.0
     }
 }
 
@@ -228,7 +247,8 @@ pub fn resolved_ident<'a, 's: 'a>(
                 |ident| {
                     // Try the ident literally, then prepend the cur_namespace
                     state.resolve_any(ident, decl_types).or_else(|| {
-                        state.resolve_any(&format!("{}.{}", state.namespace(), ident), decl_types)
+                        let ident = format!("{}.{}", state.namespace(), ident);
+                        state.resolve_any(&ident, decl_types)
                     })
                 },
             ))
@@ -374,9 +394,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case::simple("foo", NamedType { ident: "foo", namespace: "", decl_type: DeclType::Struct })]
-    #[case::nested("namespace.foo", NamedType { ident: "foo", namespace: "namespace", decl_type: DeclType::Struct })]
-    #[case::nested("one.two.three.foo", NamedType { ident: "foo", namespace: "one.two.three",decl_type: DeclType::Struct })]
+    #[case::simple("foo", NamedType { ident: "foo", namespace: "".into(), decl_type: DeclType::Struct })]
+    #[case::nested("namespace.foo", NamedType { ident: "foo", namespace: "namespace".into(), decl_type: DeclType::Struct })]
+    #[case::nested("one.two.three.foo", NamedType { ident: "foo", namespace: "one.two.three".into(),decl_type: DeclType::Struct })]
     fn resolved_ident_pass(#[case] item_str: &str, #[case] output: NamedType) {
         let mut state = ParserState::new();
 
@@ -384,9 +404,9 @@ mod tests {
         foo_decl.add_structs(["foo"]);
 
         let decls = HashMap::from([
-            ("", foo_decl.clone()),
-            ("namespace", foo_decl.clone()),
-            ("one.two.three", foo_decl.clone()),
+            ("".into(), foo_decl.clone()),
+            ("namespace".into(), foo_decl.clone()),
+            ("one.two.three".into(), foo_decl.clone()),
         ]);
 
         state.extend_decls(decls);
@@ -408,9 +428,9 @@ mod tests {
         foo_decl.add_structs(["foo"]);
 
         let decls = HashMap::from([
-            ("", foo_decl.clone()),
-            ("namespace", foo_decl.clone()),
-            ("one.two.three", foo_decl.clone()),
+            ("".into(), foo_decl.clone()),
+            ("namespace".into(), foo_decl.clone()),
+            ("one.two.three".into(), foo_decl.clone()),
         ]);
 
         state.extend_decls(decls);

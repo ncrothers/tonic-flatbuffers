@@ -20,7 +20,7 @@ pub mod parse {
         pub mod table;
         pub mod union;
     }
-    
+
     pub mod parser;
     pub mod utils;
 }

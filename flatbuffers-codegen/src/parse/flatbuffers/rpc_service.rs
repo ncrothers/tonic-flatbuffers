@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, NamedType, ParserState},
-    utils::{ident, resolved_ident, whitespace_all, whitespace_and_comments_opt},
+    utils::{ident, resolved_ident, whitespace_all, whitespace_and_comments_opt, Namespace},
 };
 
 use super::attributes::{attribute_list, Attribute, AttributeTarget};
@@ -35,7 +35,7 @@ pub struct RpcMethod<'a> {
 #[derive(Debug, PartialEq)]
 pub struct RpcService<'a> {
     name: &'a str,
-    namespace: &'a str,
+    namespace: Namespace<'a>,
     methods: Vec<RpcMethod<'a>>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
@@ -198,7 +198,7 @@ mod tests {
         }"#,
         RpcService {
             name: "Hello",
-            namespace: "",
+            namespace: "".into(),
             methods: vec![RpcMethod {
                 name: "HelloWorld",
                 parameter: NamedType::new("Table1", "", DeclType::Table),
@@ -217,7 +217,7 @@ mod tests {
         }"#,
         RpcService {
             name: "Hello",
-            namespace: "",
+            namespace: "".into(),
             methods: vec![RpcMethod {
                 name: "HelloWorld",
                 parameter: NamedType::new("Table1", "", DeclType::Table),
@@ -234,7 +234,7 @@ mod tests {
         let mut decl = TypeDecls::new();
         decl.add_tables(["Table1"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        state.extend_decls(HashMap::from([("".into(), decl)]));
 
         let res = rpc_service_item(&state)
             .parse(item_str)
@@ -255,7 +255,7 @@ mod tests {
         let mut decl = TypeDecls::new();
         decl.add_tables(["Table1"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        state.extend_decls(HashMap::from([("".into(), decl)]));
 
         assert!(rpc_service_item(&state).parse(item_str).is_err());
     }
@@ -307,7 +307,7 @@ mod tests {
         let mut decl = TypeDecls::new();
         decl.add_tables(["Table1"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        state.extend_decls(HashMap::from([("".into(), decl)]));
 
         let res = rpc_method(&state, &mut HashSet::new())
             .parse(item_str)
@@ -325,7 +325,7 @@ mod tests {
         let mut decl = TypeDecls::new();
         decl.add_tables(["Table1"]);
 
-        state.extend_decls(HashMap::from([("", decl)]));
+        state.extend_decls(HashMap::from([("".into(), decl)]));
 
         assert!(rpc_method(&state, &mut HashSet::new())
             .parse(item_str)
