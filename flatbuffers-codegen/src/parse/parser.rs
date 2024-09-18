@@ -9,7 +9,7 @@ use winnow::{
     PResult, Parser,
 };
 
-use super::flatbuffers::item::{item, namespace, Item};
+use super::{flatbuffers::item::{item, namespace, Item}, utils::{ByteSize, Namespace}};
 
 #[derive(Debug, PartialEq)]
 pub enum DeclType {
@@ -26,12 +26,12 @@ impl DeclType {
 #[derive(Debug, PartialEq)]
 pub struct NamedType<'a> {
     pub ident: &'a str,
-    pub namespace: &'a str,
+    pub namespace: Namespace<'a>,
     pub decl_type: DeclType,
 }
 
 impl<'a> NamedType<'a> {
-    pub fn new(ident: &'a str, namespace: &'a str, decl_type: DeclType) -> Self {
+    pub fn new(ident: &'a str, namespace: Namespace<'a>, decl_type: DeclType) -> Self {
         Self {
             ident,
             namespace,
@@ -40,29 +40,35 @@ impl<'a> NamedType<'a> {
     }
 }
 
+impl<'a> ByteSize for NamedType<'a> {
+    fn size(&self) -> usize {
+        todo!("implement once NamedType has access to the actual type")
+    }
+}
+
 #[derive(Debug)]
 pub struct ParserState<'a> {
-    cur_namespace: RefCell<&'a str>,
-    namespace_decls: HashMap<&'a str, TypeDecls<'a>>,
+    cur_namespace: RefCell<Namespace<'a>>,
+    namespace_decls: HashMap<Namespace<'a>, TypeDecls<'a>>,
 }
 
 impl<'a> ParserState<'a> {
     pub fn new() -> Self {
         Self {
-            cur_namespace: RefCell::new(""),
+            cur_namespace: RefCell::new(Namespace::new("")),
             namespace_decls: HashMap::new(),
         }
     }
 
-    pub fn namespace(&self) -> &'a str {
-        &self.cur_namespace.borrow()
+    pub fn namespace(&self) -> Namespace<'a> {
+        self.cur_namespace.borrow().clone()
     }
 
-    pub fn set_namespace(&self, namespace: &'a str) {
+    pub fn set_namespace(&self, namespace: Namespace<'a>) {
         *self.cur_namespace.borrow_mut() = namespace;
     }
 
-    pub fn extend_decls(&mut self, decls: HashMap<&'a str, TypeDecls<'a>>) {
+    pub fn extend_decls(&mut self, decls: HashMap<Namespace<'a>, TypeDecls<'a>>) {
         for (ns, decls) in decls {
             self.namespace_decls
                 .entry(ns)
@@ -78,7 +84,7 @@ impl<'a> ParserState<'a> {
 
     fn resolve_ident_recursive(
         &self,
-        ns: &str,
+        ns: &Namespace,
         ident: &str,
         decl_types: &[DeclType],
     ) -> Option<NamedType<'a>> {
@@ -89,61 +95,45 @@ impl<'a> ParserState<'a> {
                 match ty {
                     DeclType::Enum => {
                         if let Some(ident) = decls.enums.get(ident) {
-                            return Some(NamedType::new(ident, ns, DeclType::Enum));
+                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Enum));
                         }
                     }
                     DeclType::Struct => {
                         if let Some(ident) = decls.structs.get(ident) {
-                            return Some(NamedType::new(ident, ns, DeclType::Struct));
+                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Struct));
                         }
                     }
                     DeclType::Table => {
                         if let Some(ident) = decls.tables.get(ident) {
-                            return Some(NamedType::new(ident, ns, DeclType::Table));
+                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Table));
                         }
                     }
                     DeclType::Union => {
                         if let Some(ident) = decls.unions.get(ident) {
-                            return Some(NamedType::new(ident, ns, DeclType::Union));
+                            return Some(NamedType::new(ident, Namespace::new(ns.raw), DeclType::Union));
                         }
                     }
                 };
             }
 
             // When no namespace left to check, we can return
-            if !ns.is_empty() {
+            if !ns.raw.is_empty() {
                 return None;
             }
         }
 
         // If no match, try to split and try the next highest scope
         if let Some((ns, ident)) = ident.rsplit_once('.') {
-            self.resolve_ident_recursive(ns, ident, decl_types)
+            self.resolve_ident_recursive(&Namespace::new_raw(ns), ident, decl_types)
         } else {
             None
         }
     }
 
-    pub fn resolve_any(&self, ident: &str, ty: &[DeclType]) -> Option<NamedType<'a>> {
+    pub fn resolve_any(&self, ident: &'a str, ty: &[DeclType]) -> Option<NamedType<'a>> {
         let (ns, ident) = ident.rsplit_once('.').unwrap_or(("", ident));
 
-        self.resolve_ident_recursive(ns, ident, ty)
-    }
-
-    pub fn resolve_enum(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Enum]).is_some()
-    }
-
-    pub fn resolve_struct(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Struct]).is_some()
-    }
-
-    pub fn resolve_table(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Table]).is_some()
-    }
-
-    pub fn resolve_union(&self, ident: &str) -> bool {
-        self.resolve_any(ident, &[DeclType::Union]).is_some()
+        self.resolve_ident_recursive(&Namespace::new_raw(ns), ident, ty)
     }
 }
 
@@ -206,14 +196,14 @@ pub fn collect_includes(file: &str) -> Vec<&str> {
 
 pub fn parse_file<'a>(file: &'a str, state: &ParserState<'a>) -> anyhow::Result<Vec<Item<'a>>> {
     // Reset the current namespace
-    *state.cur_namespace.borrow_mut() = "";
+    *state.cur_namespace.borrow_mut() = Namespace::new("");
 
     trace("parse_file", repeat(0.., item(state)))
         .parse(file)
         .map_err(|e| anyhow::format_err!("{e}"))
 }
 
-pub fn get_namespaced_decls(file: &str) -> PResult<HashMap<&str, TypeDecls<'_>>> {
+pub fn get_namespaced_decls(file: &str) -> PResult<HashMap<Namespace, TypeDecls<'_>>> {
     let mut file = file;
 
     let input = &mut file;

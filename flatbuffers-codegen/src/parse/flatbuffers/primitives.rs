@@ -187,12 +187,6 @@ impl<'a> ByteSize for ArrayItemType<'a> {
     }
 }
 
-impl<'a> ByteSize for NamedType<'a> {
-    fn size(&self) -> usize {
-        todo!("implement once NamedType has access to the actual type")
-    }
-}
-
 pub fn array_type<'a, 's: 'a>(
     state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Array<'s>, ContextError> + 'a {

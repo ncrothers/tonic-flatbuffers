@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{hash::Hash, str::FromStr};
 
 use winnow::{
     ascii::till_line_ending,
@@ -32,7 +32,63 @@ pub trait TypeName {
 
 impl_typename!(i8, u8, i16, u16, i32, u32, i64, u64, f32, f64);
 
-pub(crate) trait ByteSize {
+/// Wrapper around a namespace that stores both the raw and split namespace
+/// for easy access to the components
+#[derive(Clone, Debug)]
+pub struct Namespace<'a> {
+    pub raw: &'a str,
+    pub components: Vec<&'a str>,
+}
+
+impl<'a> Namespace<'a> {
+    pub fn new(ns: &'a str) -> Self {
+        let components = if ns.is_empty() {
+            // If the namespace is empty (root namespace), no components
+            Vec::new()
+        } else {
+            ns.split('.').collect()
+        };
+
+        Self {
+            raw: ns,
+            components,
+        }
+    }
+
+    /// Creates a [`Namespace`] with _only_ the `raw` field. This should
+    /// **only be used** when creating a namespace where only the raw identifier
+    /// is needed; `components` will be empty regardless of `raw`.
+    pub(crate) fn new_raw(ns: &'a str) -> Self {
+        Self {
+            raw: ns,
+            components: Vec::new(),
+        }
+    }
+}
+
+impl Hash for Namespace<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Only hash the raw namespace
+        self.raw.hash(state);
+    }
+}
+
+impl PartialEq for Namespace<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl Eq for Namespace<'_> {}
+
+impl std::fmt::Display for Namespace<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Use the raw's implementation
+        self.raw.fmt(f)
+    }
+}
+
+pub trait ByteSize {
     /// Returns the size in bytes of the type when serialized
     fn size(&self) -> usize;
 }
