@@ -264,7 +264,9 @@ pub fn parse_file<'a>(
 
                 let items = parse_file(include_file_str, state, include_paths, loaded, parsed_types, parsed_files)?;
 
-
+                for item in items {
+                    
+                }
             }
 
             *state.cur_namespace.borrow_mut() = prev_namespace;
