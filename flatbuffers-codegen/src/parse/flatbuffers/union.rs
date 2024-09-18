@@ -15,27 +15,34 @@ use crate::parse::{
 
 use super::attributes::{attribute_list, Attribute, AttributeTarget};
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UnionVariant<'a> {
     /// Name of the variant
-    name: &'a str,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub name: &'a str,
     /// Will be the same as `name` when no alias is given
-    actual_type: &'a str,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub actual_type: &'a str,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Union<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    variants: Vec<UnionVariant<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    pub variants: Vec<UnionVariant<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn union_variant<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, UnionVariant<'s>, ContextError> + 'a {
     move |input: &mut _| {
@@ -107,7 +114,7 @@ fn union_variant<'a, 's: 'a>(
 }
 
 pub fn union_item<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, Union<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("union", |input: &mut _| {
@@ -153,13 +160,14 @@ pub fn union_item<'a, 's: 'a>(
     }
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use rstest::rstest;
 
-    use crate::parse::parser::TypeDecls;
+    use crate::parse::{flatbuffers::table::Table, parser::TypeDecls};
 
     use super::*;
 
@@ -169,26 +177,19 @@ mod tests {
             Variant1,
             Variant2,
         }"#,
-        Union {
-            name: "Hello",
-            namespace: Namespace::default(),
-            variants: vec![
-                UnionVariant {
-                    name: "Variant1",
-                    actual_type: "Variant1",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                UnionVariant {
-                    name: "Variant2",
-                    actual_type: "Variant2",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-            ],
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        Union::builder()
+            .name("Hello")
+            .variants(vec![
+                UnionVariant::builder()
+                    .name("Variant1")
+                    .actual_type("Variant1")
+                    .build(),
+                UnionVariant::builder()
+                    .name("Variant2")
+                    .actual_type("Variant2")
+                    .build(),
+            ])
+            .build()
     )]
     #[case::comments(
         r#"/// This is a comment!
@@ -196,112 +197,72 @@ mod tests {
             Variant1,
             Variant2,
         }"#,
-        Union {
-            name: "Hello",
-            namespace: Namespace::default(),
-            variants: vec![
-                UnionVariant {
-                    name: "Variant1",
-                    actual_type: "Variant1",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                UnionVariant {
-                    name: "Variant2",
-                    actual_type: "Variant2",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-            ],
-            comments: vec!["This is a comment!"],
-            attributes: Vec::new(),
-        }
+        Union::builder()
+            .name("Hello")
+            .variants(vec![
+                UnionVariant::builder()
+                    .name("Variant1")
+                    .actual_type("Variant1")
+                    .build(),
+                UnionVariant::builder()
+                    .name("Variant2")
+                    .actual_type("Variant2")
+                    .build(),
+            ])
+            .comments(vec!["This is a comment!"])
+            .build()
     )]
     #[case::attributes(
         r#"union Hello (custom_attr) {
             Variant1,
             Variant2,
         }"#,
-        Union {
-            name: "Hello",
-            namespace: Namespace::default(),
-            variants: vec![
-                UnionVariant {
-                    name: "Variant1",
-                    actual_type: "Variant1",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                UnionVariant {
-                    name: "Variant2",
-                    actual_type: "Variant2",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-            ],
-            comments: Vec::new(),
-            attributes: vec![Attribute::Custom { name: "custom_attr", value: None }],
-        }
+        Union::builder()
+            .name("Hello")
+            .variants(vec![
+                UnionVariant::builder()
+                    .name("Variant1")
+                    .actual_type("Variant1")
+                    .build(),
+                UnionVariant::builder()
+                    .name("Variant2")
+                    .actual_type("Variant2")
+                    .build(),
+            ])
+            .attributes(vec![Attribute::Custom { name: "custom_attr", value: None }])
+            .build()
     )]
     #[case::variant_aliasing(
         r#"union Hello {
             Variant1,
             Variant2:Variant1,
         }"#,
-        Union {
-            name: "Hello",
-            namespace: Namespace::default(),
-            variants: vec![
-                UnionVariant {
-                    name: "Variant1",
-                    actual_type: "Variant1",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                UnionVariant {
-                    name: "Variant2",
-                    actual_type: "Variant1",
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-            ],
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        Union::builder()
+            .name("Hello")
+            .variants(vec![
+                UnionVariant::builder()
+                    .name("Variant1")
+                    .actual_type("Variant1")
+                    .build(),
+                UnionVariant::builder()
+                    .name("Variant2")
+                    .actual_type("Variant1")
+                    .build(),
+            ])
+            .build()
     )]
     fn union_pass(#[case] item_str: &str, #[case] output: Union) {
         let mut state = ParserState::new();
         let mut decl = TypeDecls::new();
-        decl.add_tables(["Variant1", "Variant2", "Variant3"]);
+        decl.add_tables([
+            Table::builder().name("Variant1").build(),
+            Table::builder().name("Variant2").build(),
+            Table::builder().name("Variant3").build(),
+        ]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
 
         assert_eq!(union_item(&state).parse(item_str), Ok(output));
-
-        let enum_invalid1 = r#"
-            union Hello_There : int32 {}"#;
-
-        let enum_invalid2 = r#"
-            union Hello_There {
-                Variant = 1,
-            }"#;
-
-        let enum_invalid3 = r#"
-            union Hello_There {
-                Variant1:,
-            }"#;
-
-        let enum_invalid4 = r#"
-            union Hello_There {
-                Variant1,
-                :Variant2
-            }"#;
-
-        let invalid = [enum_invalid1, enum_invalid2, enum_invalid3, enum_invalid4];
-
-        for item in invalid {
-            assert!(union_item(&state).parse(item).is_err());
-        }
     }
 
     #[rstest]
@@ -328,7 +289,11 @@ mod tests {
     fn union_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
         let mut decl = TypeDecls::new();
-        decl.add_tables(["Variant1", "Variant2", "Variant3"]);
+        decl.add_tables([
+            Table::builder().name("Variant1").build(),
+            Table::builder().name("Variant2").build(),
+            Table::builder().name("Variant3").build(),
+        ]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
 

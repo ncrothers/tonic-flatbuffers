@@ -19,15 +19,19 @@ use super::{
     primitives::ScalarType,
 };
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EnumVariant<'a, T> {
+    #[cfg_attr(feature = "builder", builder(!default))]
     name: &'a str,
+    #[cfg_attr(feature = "builder", builder(setter(strip_option)))]
     idx: Option<T>,
     comments: Vec<&'a str>,
     attributes: Vec<Attribute<'a>>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EnumData<'a> {
     /// Alias of `byte`
     Int8(Vec<EnumVariant<'a, i8>>),
@@ -47,17 +51,21 @@ pub enum EnumData<'a> {
     UInt64(Vec<EnumVariant<'a, u64>>),
 }
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Enum<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    variants: EnumData<'a>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub variants: EnumData<'a>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn enum_variant<'a, 's: 'a, T>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, EnumVariant<'s, T>, ContextError> + 'a
 where
@@ -120,7 +128,7 @@ where
 }
 
 pub fn enum_item<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, Enum<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("enum", |input: &mut _| {
@@ -164,7 +172,7 @@ pub fn enum_item<'a, 's: 'a>(
                 .parse_next(input)?;
 
             fn parse_variants<'a, 's: 'a, T: FromStr + TypeName>(
-                state: &'a ParserState<'s>,
+                state: &'s ParserState<'s>,
             ) -> impl Parser<&'s str, Vec<EnumVariant<'s, T>>, ContextError> + 'a {
                 move |input: &mut _| {
                     let mut field_idents = HashSet::new();
@@ -256,6 +264,7 @@ pub fn enum_item<'a, 's: 'a>(
     }
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -269,32 +278,14 @@ mod tests {
             Variant2,
             Variant3
         }"#,
-        Enum {
-            name: "Hello",
-            namespace: "".into(),
-            variants: EnumData::UInt32(vec![
-                EnumVariant {
-                    name: "Variant1",
-                    idx: None,
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                EnumVariant {
-                    name: "Variant2",
-                    idx: None,
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                EnumVariant {
-                    name: "Variant3",
-                    idx: None,
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-            ]),
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        Enum::builder()
+            .name("Hello")
+            .variants(EnumData::UInt32(vec![
+                EnumVariant::builder().name("Variant1").build(),
+                EnumVariant::builder().name("Variant2").build(),
+                EnumVariant::builder().name("Variant3").build(),
+            ]))
+            .build()
     )]
     #[case::comments(
         r#"// This is NOT documentation
@@ -304,78 +295,57 @@ mod tests {
             /// Comment
             Variant2,
         }"#,
-        Enum {
-            name: "Hello_There",
-            namespace: "".into(),
-            variants: EnumData::Int32(vec![
-                EnumVariant {
-                    name: "Variant1",
-                    idx: None,
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                EnumVariant {
-                    name: "Variant2",
-                    idx: None,
-                    comments: vec!["Comment"],
-                    attributes: Vec::new(),
-                },
-            ]),
-            comments: vec!["This is a comment!"],
-            attributes: Vec::new(),
-        }
+        Enum::builder()
+            .name("Hello_There")
+            .variants(EnumData::Int32(vec![
+                EnumVariant::builder()
+                    .name("Variant1")
+                    .build(),
+                EnumVariant::builder()
+                    .name("Variant2")
+                    .comments(vec!["Comment"])
+                    .build(),
+            ]))
+            .comments(vec!["This is a comment!"])
+            .build()
     )]
     #[case::indices(
         r#"enum Hello_There : int {
             Variant1 = 0,
             Variant2 = 1,
         }"#,
-        Enum {
-            name: "Hello_There",
-            namespace: "".into(),
-            variants: EnumData::Int32(vec![
-                EnumVariant {
-                    name: "Variant1",
-                    idx: Some(0),
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                EnumVariant {
-                    name: "Variant2",
-                    idx: Some(1),
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-            ]),
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        Enum::builder()
+            .name("Hello_There")
+            .variants(EnumData::Int32(vec![
+                EnumVariant::builder()
+                    .name("Variant1")
+                    .idx(0)
+                    .build(),
+                EnumVariant::builder()
+                    .name("Variant2")
+                    .idx(1)
+                    .build(),
+            ]))
+            .build()
     )]
     #[case::attributes(
         r#"enum Hello_There : int (bit_flags) {
             Variant1,
             Variant2 (custom_attr: "foo"),
         }"#,
-        Enum {
-            name: "Hello_There",
-            namespace: "".into(),
-            variants: EnumData::Int32(vec![
-                EnumVariant {
-                    name: "Variant1",
-                    idx: None,
-                    comments: Vec::new(),
-                    attributes: Vec::new(),
-                },
-                EnumVariant {
-                    name: "Variant2",
-                    idx: None,
-                    comments: Vec::new(),
-                    attributes: vec![Attribute::Custom { name: "custom_attr", value: Some("foo") }],
-                },
-            ]),
-            comments: Vec::new(),
-            attributes: vec![Attribute::BitFlags],
-        }
+        Enum::builder()
+            .name("Hello_There")
+            .variants(EnumData::Int32(vec![
+                EnumVariant::builder()
+                    .name("Variant1")
+                    .build(),
+                EnumVariant::builder()
+                    .name("Variant2")
+                    .attributes(vec![Attribute::Custom { name: "custom_attr", value: Some("foo") }])
+                    .build(),
+            ]))
+            .attributes(vec![Attribute::BitFlags])
+            .build()
     )]
     fn enum_pass(#[case] item_str: &str, #[case] output: Enum) {
         let state = ParserState::new();

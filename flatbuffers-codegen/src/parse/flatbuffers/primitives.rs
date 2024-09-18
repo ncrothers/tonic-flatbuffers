@@ -12,19 +12,19 @@ use crate::parse::{
     utils::{ident, resolved_ident, whitespace_and_comments_opt, ByteSize},
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Array<'a> {
     pub item_type: ArrayItemType<'a>,
     pub length: usize,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ArrayItemType<'a> {
     Named(NamedType<'a>),
     Scalar(ScalarType),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TableFieldType<'a> {
     Named(NamedType<'a>),
     Scalar(ScalarType),
@@ -34,14 +34,14 @@ pub enum TableFieldType<'a> {
 
 /// Type that a struct field can have, which is limited to other structs and
 /// scalar types.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StructFieldType<'a> {
     Array(Array<'a>),
     Named(NamedType<'a>),
     Scalar(ScalarType),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum VectorItemType<'a> {
     Named(NamedType<'a>),
     Scalar(ScalarType),
@@ -73,7 +73,7 @@ pub enum ScalarType {
     Float64,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DefaultValue<'a> {
     /// Alias of `byte`
     Int8(i8),
@@ -188,7 +188,7 @@ impl<'a> ByteSize for ArrayItemType<'a> {
 }
 
 pub fn array_type<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, Array<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("array_type", |input: &mut _| {
@@ -231,7 +231,7 @@ pub fn array_type<'a, 's: 'a>(
 }
 
 pub fn struct_field_type<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, StructFieldType<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("struct_field_type", |input: &mut _| {
@@ -257,7 +257,7 @@ pub fn struct_field_type<'a, 's: 'a>(
 }
 
 pub fn vector_type<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, VectorItemType<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("vector_type", |input: &mut _| {
@@ -291,7 +291,7 @@ pub fn vector_type<'a, 's: 'a>(
 }
 
 pub fn table_field_type<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, TableFieldType<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("table_field_type", |i: &mut _| {
@@ -340,13 +340,14 @@ pub fn scalar_type(input: &mut &str) -> PResult<ScalarType> {
     .parse_next(input)
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use rstest::rstest;
 
-    use crate::parse::parser::TypeDecls;
+    use crate::parse::{flatbuffers::{r#struct::Struct, table::Table}, parser::TypeDecls, utils::test_utils::placeholder_item};
 
     use super::*;
 
@@ -390,17 +391,17 @@ mod tests {
     #[case::string("[string]", VectorItemType::String)]
     #[case::named_(
         "[foo]",
-        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct))
+        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct, placeholder_item(),))
     )]
     #[case::whitespace(
         "[ \nfoo\n ]",
-        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct))
+        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct, placeholder_item(),))
     )]
     fn vector_wrapped_pass(#[case] item_str: &str, #[case] output: VectorItemType) {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs(["foo"]);
+        foo_decl.add_structs([Struct::builder().name("foo").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
@@ -457,6 +458,7 @@ mod tests {
                 "Struct1",
                 "",
                 DeclType::Struct,
+                placeholder_item(),
             )),
             length: 1_500_000,
         },
@@ -472,7 +474,7 @@ mod tests {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs(["Struct1"]);
+        foo_decl.add_structs([Struct::builder().name("Struct1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
@@ -491,7 +493,7 @@ mod tests {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_tables(["Table1"]);
+        foo_decl.add_tables([Table::builder().name("Table1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
@@ -505,11 +507,12 @@ mod tests {
     #[case::named(
         "Struct1",
         StructFieldType::Named(
-            NamedType {
-                ident: "Struct1",
-                namespace: "".into(),
-                decl_type: DeclType::Struct,
-            }
+            NamedType::new(
+                "Struct1",
+                "",
+                DeclType::Struct,
+                placeholder_item(),
+            )
         ),
     )]
     #[case::array(
@@ -523,7 +526,7 @@ mod tests {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs(["Struct1"]);
+        foo_decl.add_structs([Struct::builder().name("Struct1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
 
@@ -540,7 +543,7 @@ mod tests {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_tables(["Table1"]);
+        foo_decl.add_tables([Table::builder().name("Table1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
 

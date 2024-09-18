@@ -15,7 +15,7 @@ use crate::parse::{
 
 use super::attributes::{attribute_list, Attribute, AttributeTarget};
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StreamingMode {
     None,
     Client,
@@ -23,26 +23,34 @@ pub enum StreamingMode {
     Bidirectional,
 }
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RpcMethod<'a> {
-    name: &'a str,
-    parameter: NamedType<'a>,
-    return_type: NamedType<'a>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub name: &'a str,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub parameter: NamedType<'a>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub return_type: NamedType<'a>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RpcService<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    methods: Vec<RpcMethod<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    pub methods: Vec<RpcMethod<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn rpc_method_parameter<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, NamedType<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("rpc_method_parameter", |input: &mut _| {
@@ -67,7 +75,7 @@ fn rpc_method_parameter<'a, 's: 'a>(
 }
 
 fn rpc_method<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, RpcMethod<'s>, ContextError> + 'a {
     move |input: &mut _| {
@@ -135,7 +143,7 @@ fn rpc_method<'a, 's: 'a>(
 }
 
 pub fn rpc_service_item<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, RpcService<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("rpc_service", |input: &mut _| {
@@ -181,13 +189,14 @@ pub fn rpc_service_item<'a, 's: 'a>(
     }
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use rstest::rstest;
 
-    use crate::parse::parser::{DeclType, NamedType, TypeDecls};
+    use crate::parse::{flatbuffers::table::Table, parser::{DeclType, NamedType, TypeDecls}, utils::test_utils::placeholder_item};
 
     use super::*;
 
@@ -196,43 +205,38 @@ mod tests {
         r#"rpc_service Hello {
             HelloWorld(Table1) : Table1;
         }"#,
-        RpcService {
-            name: "Hello",
-            namespace: "".into(),
-            methods: vec![RpcMethod {
-                name: "HelloWorld",
-                parameter: NamedType::new("Table1", "", DeclType::Table),
-                return_type: NamedType::new("Table1", "", DeclType::Table),
-                comments: Vec::new(),
-                attributes: Vec::new(),
-            }],
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        RpcService::builder()
+            .name("Hello")
+            .methods(vec![
+                RpcMethod::builder()
+                    .name("HelloWorld")
+                    .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+                    .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+                    .build()
+            ])
+            .build()
     )]
     #[case::comments(
         r#"/// Service comment
         rpc_service Hello {
             HelloWorld(Table1) : Table1;
         }"#,
-        RpcService {
-            name: "Hello",
-            namespace: "".into(),
-            methods: vec![RpcMethod {
-                name: "HelloWorld",
-                parameter: NamedType::new("Table1", "", DeclType::Table),
-                return_type: NamedType::new("Table1", "", DeclType::Table),
-                comments: Vec::new(),
-                attributes: Vec::new(),
-            }],
-            comments: vec!["Service comment"],
-            attributes: Vec::new(),
-        }
+        RpcService::builder()
+            .name("Hello")
+            .methods(vec![
+                RpcMethod::builder()
+                    .name("HelloWorld")
+                    .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+                    .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+                    .build()
+            ])
+            .comments(vec!["Service comment"])
+            .build()
     )]
     fn rpc_service_pass(#[case] item_str: &str, #[case] output: RpcService) {
         let mut state = ParserState::new();
         let mut decl = TypeDecls::new();
-        decl.add_tables(["Table1"]);
+        decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
 
@@ -253,7 +257,7 @@ mod tests {
     fn rpc_service_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
         let mut decl = TypeDecls::new();
-        decl.add_tables(["Table1"]);
+        decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
 
@@ -263,49 +267,43 @@ mod tests {
     #[rstest]
     #[case::simple(
         "HelloWorld(Table1) : Table1;",
-        RpcMethod {
-            name: "HelloWorld",
-            parameter: NamedType::new("Table1", "", DeclType::Table),
-            return_type: NamedType::new("Table1", "", DeclType::Table),
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        RpcMethod::builder()
+            .name("HelloWorld")
+            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .build()
     )]
     #[case::whitespace(
         " \n HelloWorld \n ( \n Table1 \n ) \n : \n Table1 \n;",
-        RpcMethod {
-            name: "HelloWorld",
-            parameter: NamedType::new("Table1", "", DeclType::Table),
-            return_type: NamedType::new("Table1", "", DeclType::Table),
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        RpcMethod::builder()
+            .name("HelloWorld")
+            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .build()
     )]
     #[case::comments(
         r#"/// Method comment
         HelloWorld(Table1) : Table1;"#,
-        RpcMethod {
-            name: "HelloWorld",
-            parameter: NamedType::new("Table1", "", DeclType::Table),
-            return_type: NamedType::new("Table1", "", DeclType::Table),
-            comments: vec!["Method comment"],
-            attributes: Vec::new(),
-        }
+        RpcMethod::builder()
+            .name("HelloWorld")
+            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .comments(vec!["Method comment"])
+            .build()
     )]
     #[case::streaming(
         "HelloWorld(Table1) : Table1 (streaming: \"bidi\");",
-        RpcMethod {
-            name: "HelloWorld",
-            parameter: NamedType::new("Table1", "", DeclType::Table),
-            return_type: NamedType::new("Table1", "", DeclType::Table),
-            comments: Vec::new(),
-            attributes: vec![Attribute::Streaming(StreamingMode::Bidirectional)],
-        }
+        RpcMethod::builder()
+            .name("HelloWorld")
+            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .attributes(vec![Attribute::Streaming(StreamingMode::Bidirectional)])
+            .build()
     )]
     fn rpc_method_pass(#[case] item_str: &str, #[case] output: RpcMethod) {
         let mut state = ParserState::new();
         let mut decl = TypeDecls::new();
-        decl.add_tables(["Table1"]);
+        decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
 
@@ -323,7 +321,7 @@ mod tests {
     fn rpc_method_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
         let mut decl = TypeDecls::new();
-        decl.add_tables(["Table1"]);
+        decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
 

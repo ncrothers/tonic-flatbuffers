@@ -33,7 +33,7 @@ pub enum AttributeTarget {
 
 pub type StrCheckpoint<'a> = Checkpoint<&'a str, &'a str>;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AttributesWrapper<'a> {
     pub attrs: Vec<Attribute<'a>>,
     pub attr_chks: Vec<StrCheckpoint<'a>>,
@@ -46,7 +46,7 @@ impl<'a> PartialEq for AttributesWrapper<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Attribute<'a> {
     BitFlags,
     Deprecated,
@@ -199,7 +199,7 @@ impl<'a> Attribute<'a> {
 }
 
 fn parse_attribute<'a, 's: 'a>(
-    _state: &'a ParserState<'s>,
+    _state: &'s ParserState<'s>,
     target: AttributeTarget,
 ) -> impl Parser<&'s str, (Attribute<'s>, StrCheckpoint<'s>), ContextError> + 'a {
     move |input: &mut _| {
@@ -273,7 +273,7 @@ fn parse_attribute<'a, 's: 'a>(
 }
 
 pub fn attribute_list<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
     target: AttributeTarget,
 ) -> impl Parser<&'s str, AttributesWrapper<'s>, ContextError> + 'a {
     move |input: &mut _| {
@@ -338,6 +338,7 @@ pub fn attribute_list<'a, 's: 'a>(
     }
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use rstest::rstest;

@@ -18,16 +18,23 @@ use super::{
     primitives::{struct_field_type, StructFieldType},
 };
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StructField<'a> {
+    #[cfg_attr(feature = "builder", builder(!default))]
     pub name: &'a str,
+    #[cfg_attr(feature = "builder", builder(!default))]
     pub field_type: StructFieldType<'a>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
 }
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Struct<'a> {
+    #[cfg_attr(feature = "builder", builder(!default))]
     pub name: &'a str,
     pub namespace: Namespace<'a>,
     pub fields: Vec<StructField<'a>>,
@@ -48,7 +55,7 @@ impl<'a> ByteSize for StructField<'a> {
 }
 
 fn struct_field<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, StructField<'s>, ContextError> + 'a {
     move |input: &mut _| {
@@ -107,7 +114,7 @@ fn struct_field<'a, 's: 'a>(
 }
 
 pub fn struct_item<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, Struct<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("struct", |input: &mut _| {
@@ -153,13 +160,14 @@ pub fn struct_item<'a, 's: 'a>(
     }
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use rstest::rstest;
 
-    use crate::parse::{flatbuffers::primitives::ScalarType, parser::TypeDecls};
+    use crate::parse::{flatbuffers::{primitives::ScalarType, table::Table}, parser::TypeDecls};
 
     use super::*;
 
@@ -168,18 +176,15 @@ mod tests {
         r#"struct Hello {
             foo:uint32;
         }"#,
-        Struct {
-            name: "Hello",
-            namespace: Namespace::default(),
-            fields: vec![StructField {
-                name: "foo",
-                field_type: StructFieldType::Scalar(ScalarType::UInt32),
-                comments: Vec::new(),
-                attributes: Vec::new(),
-            }],
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        Struct::builder()
+            .name("Hello")
+            .fields(vec![
+                StructField::builder()
+                    .name("foo")
+                    .field_type(StructFieldType::Scalar(ScalarType::UInt32))
+                    .build()
+            ])
+            .build()
     )]
     #[case::comments(
         r#"// This is NOT documentation
@@ -188,35 +193,31 @@ mod tests {
             foo:uint32;
             /// This should be ignored
         }"#,
-        Struct {
-            name: "Hello",
-            namespace: Namespace::default(),
-            fields: vec![StructField {
-                name: "foo",
-                field_type: StructFieldType::Scalar(ScalarType::UInt32),
-                comments: Vec::new(),
-                attributes: Vec::new(),
-            }],
-            comments: vec!["This is a comment!"],
-            attributes: Vec::new(),
-        }
+        Struct::builder()
+            .name("Hello")
+            .fields(vec![
+                StructField::builder()
+                    .name("foo")
+                    .field_type(StructFieldType::Scalar(ScalarType::UInt32))
+                    .build()
+            ])
+            .comments(vec!["This is a comment!"])
+            .build()
     )]
     #[case::attributes(
         r#"struct Hello (force_align: 10) {
             foo:uint32;
         }"#,
-        Struct {
-            name: "Hello",
-            namespace: Namespace::default(),
-            fields: vec![StructField {
-                name: "foo",
-                field_type: StructFieldType::Scalar(ScalarType::UInt32),
-                comments: Vec::new(),
-                attributes: Vec::new(),
-            }],
-            comments: Vec::new(),
-            attributes: vec![Attribute::ForceAlign(10)],
-        }
+        Struct::builder()
+            .name("Hello")
+            .fields(vec![
+                StructField::builder()
+                    .name("foo")
+                    .field_type(StructFieldType::Scalar(ScalarType::UInt32))
+                    .build()
+            ])
+            .attributes(vec![Attribute::ForceAlign(10)])
+            .build()
     )]
     fn struct_pass(#[case] item_str: &str, #[case] output: Struct) {
         let state = ParserState::new();
@@ -306,7 +307,7 @@ mod tests {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_tables(["Table1"]);
+        foo_decl.add_tables([Table::builder().name("Table1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
 

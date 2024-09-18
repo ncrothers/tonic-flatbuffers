@@ -21,7 +21,7 @@ use super::{
     union::{union_item, Union},
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Item<'a> {
     Attribute(&'a str),
     Comment(Vec<&'a str>),
@@ -37,8 +37,26 @@ pub enum Item<'a> {
     Union(Union<'a>),
 }
 
+impl<'a> Item<'a> {
+    /// Return a `&str` representing the identifier of the item. For comments, it's just
+    /// the literal `"comment"`; for everything else, there is a name or literal
+    /// associated with it, so it returns that.
+    pub fn ident(&self) -> &'a str {
+        match self {
+            Item::Attribute(ident) | Item::FileExtension(ident) | Item::FileIdentifier(ident) | Item::Include(ident) | Item::RootType(ident) => ident,
+            Item::Comment(_) => "comment",
+            Item::Enum(enum_) => enum_.name,
+            Item::Namespace(namespace) => namespace.raw,
+            Item::RpcService(rpc_service) => rpc_service.name,
+            Item::Struct(struct_) => struct_.name,
+            Item::Table(table) => table.name,
+            Item::Union(union) => union.name,
+        }
+    }
+}
+
 pub fn item<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, Item<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("item", |input: &mut _| {
@@ -68,7 +86,7 @@ pub fn item<'a, 's: 'a>(
 }
 
 fn attribute_decl<'a, 's: 'a>(
-    _state: &'a ParserState<'s>,
+    _state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("attribute_decl", |input: &mut _| {
@@ -90,7 +108,7 @@ fn attribute_decl<'a, 's: 'a>(
 }
 
 fn file_extension<'a, 's: 'a>(
-    _state: &'a ParserState<'s>,
+    _state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("file_extension", |input: &mut _| {
@@ -112,7 +130,7 @@ fn file_extension<'a, 's: 'a>(
 }
 
 fn file_identifier<'a, 's: 'a>(
-    _state: &'a ParserState<'s>,
+    _state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("file_identifier", |input: &mut _| {
@@ -139,7 +157,7 @@ fn file_identifier<'a, 's: 'a>(
 }
 
 pub fn include<'a, 's: 'a>(
-    _state: &'a ParserState<'s>,
+    _state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("include", |input: &mut _| {
@@ -161,7 +179,7 @@ pub fn include<'a, 's: 'a>(
 }
 
 pub fn namespace<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, Namespace<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("namespace", |input: &mut _| {
@@ -189,7 +207,7 @@ pub fn namespace<'a, 's: 'a>(
 }
 
 pub fn root_type<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     move |input: &mut _| {
         trace("root_type", |input: &mut _| {
@@ -211,6 +229,7 @@ pub fn root_type<'a, 's: 'a>(
     }
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -221,64 +240,42 @@ mod tests {
 
     use super::*;
 
-    #[rstest]
-    #[case::attribute("attribute \"testing\";", |x| matches!(x, Item::Attribute("testing")))]
-    #[case::file_identifier(
-        "file_identifier \"TEST\";",
-        |x| matches!(x, Item::FileIdentifier("TEST"))
-    )]
-    #[case::file_extension(
-        "file_extension \"ext\";",
-        |x| matches!(x, Item::FileExtension("ext"))
-    )]
-    #[case::include(
-        "include \"file.fbs\";",
-        |x| matches!(x, Item::Include("file.fbs"))
-    )]
-    #[case::root_type(
-        "root_type Table;",
-        |x| matches!(x, Item::RootType("Table"))
-    )]
-    #[case::namespace(
-        "namespace one.two.three;",
-        |x| matches!(x, Item::Namespace(Namespace { raw, components }) if raw == "one.two.three" && components == vec!["one", "two", "three"])
-    )]
-    #[case::enum_(
-        "enum test:int {}",
-        |x| matches!(x, Item::Enum(_))
-    )]
-    #[case::struct_(
-        "struct test {}",
-        |x| matches!(x, Item::Struct(_))
-    )]
-    #[case::table(
-        "table test {}",
-        |x| matches!(x, Item::Table(_))
-    )]
-    #[case::union(
-        "union test {}",
-        |x| matches!(x, Item::Union(_))
-    )]
-    fn item_pass(
-        #[case] item_str: &'static str,
-        #[case] output: impl FnOnce(Item<'static>) -> bool,
-    ) {
+    macro_rules! assert_item_parse {
+        ($state:expr, $str_val:expr, $func:expr) => {
+            let item = item($state).parse($str_val);
+            assert!(item.is_ok());
+            let item = item.unwrap();
+    
+            let output = $func;
+
+            assert!(output(item));
+        };
+    }
+
+    #[test]
+    fn item_pass() {
         let mut state_ = ParserState::new();
         let mut decl = TypeDecls::new();
-        decl.add_tables(["Table"]);
+        decl.add_tables([
+            Table::builder()
+                .name("Table")
+                .build()
+        ]);
 
         state_.extend_decls(HashMap::from([("".into(), decl)]));
 
         let state = &state_;
 
-        let item = item(state).parse(item_str);
-        assert!(item.is_ok());
-        let item = item.unwrap();
-
-        assert!(output(item));
-
-        // assert!(item(state).parse("file_identifier \"TESTa\";").is_err());
-        // assert!(item(state).parse("file_identifier \"TES\";").is_err());
+        assert_item_parse!(&state, "attribute \"testing\";", |x| matches!(x, Item::Attribute("testing")));
+        assert_item_parse!(&state, "file_identifier \"TEST\";", |x| matches!(x, Item::FileIdentifier("TEST")));
+        assert_item_parse!(&state, "file_extension \"ext\";", |x| matches!(x, Item::FileExtension("ext")));
+        assert_item_parse!(&state, "include \"file.fbs\";", |x| matches!(x, Item::Include("file.fbs")));
+        assert_item_parse!(&state, "root_type Table;", |x| matches!(x, Item::RootType("Table")));
+        assert_item_parse!(&state, "namespace one.two.three;", |x| matches!(x, Item::Namespace(Namespace { raw, components }) if raw == "one.two.three" && components == vec!["one", "two", "three"]));
+        assert_item_parse!(&state, "enum test:int {}", |x| matches!(x, Item::Enum(_)));
+        assert_item_parse!(&state, "struct test {}", |x| matches!(x, Item::Struct(_)));
+        assert_item_parse!(&state, "table test {}", |x| matches!(x, Item::Table(_)));
+        assert_item_parse!(&state, "union test {}", |x| matches!(x, Item::Union(_)));
     }
 
     #[rstest]

@@ -18,14 +18,21 @@ use super::{
     primitives::{table_field_type, DefaultValue, TableFieldType},
 };
 
-#[derive(Debug)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug)]
 pub struct TableField<'a> {
-    name: &'a str,
-    field_type: TableFieldType<'a>,
-    default: Option<DefaultValue<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Option<AttributesWrapper<'a>>,
-    attr_start: Option<StrCheckpoint<'a>>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub name: &'a str,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub field_type: TableFieldType<'a>,
+    #[cfg_attr(feature = "builder", builder(setter(strip_option)))]
+    pub default: Option<DefaultValue<'a>>,
+    pub comments: Vec<&'a str>,
+    #[cfg_attr(feature = "builder", builder(setter(strip_option)))]
+    pub attributes: Option<AttributesWrapper<'a>>,
+    #[cfg_attr(feature = "builder", builder(setter(strip_option)))]
+    pub attr_start: Option<StrCheckpoint<'a>>,
 }
 
 impl<'a> PartialEq for TableField<'a> {
@@ -38,17 +45,20 @@ impl<'a> PartialEq for TableField<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "builder", derive(typed_builder::TypedBuilder))]
+#[cfg_attr(feature = "builder", builder(field_defaults(default)))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Table<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    fields: Vec<TableField<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    #[cfg_attr(feature = "builder", builder(!default))]
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    pub fields: Vec<TableField<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn table_field<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
     require_id: &'a mut Option<bool>,
 ) -> impl Parser<&'s str, TableField<'s>, ContextError> + 'a {
@@ -129,7 +139,7 @@ fn table_field<'a, 's: 'a>(
 }
 
 pub fn table_item<'a, 's: 'a>(
-    state: &'a ParserState<'s>,
+    state: &'s ParserState<'s>,
 ) -> impl Parser<&'s str, Table<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("table", |input: &mut _| {
@@ -220,7 +230,7 @@ pub fn table_item<'a, 's: 'a>(
                                     if let Attribute::Id(field_id) = attr {
                                         has_id = true;
                                         // A union takes up 2 spots, so its index should be i+1
-                                        if matches!(field.field_type, TableFieldType::Named(NamedType { ident: _, namespace: _, decl_type: DeclType::Union })) {
+                                        if matches!(field.field_type, TableFieldType::Named(NamedType { ident: _, namespace: _, decl_type: DeclType::Union, item_ref: _ })) {
                                             if *field_id == 0 {
                                                 err!(chk, "id; union ids can only be 1 at the lowest");
                                             }
@@ -290,13 +300,12 @@ pub fn table_item<'a, 's: 'a>(
     }
 }
 
+#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use rstest::rstest;
 
-    use crate::parse::{flatbuffers::primitives::ScalarType, parser::TypeDecls};
+    use crate::parse::flatbuffers::primitives::ScalarType;
 
     use super::*;
 
@@ -305,20 +314,15 @@ mod tests {
         r#"table Hello {
             foo:uint32;
         }"#,
-        Table {
-            name: "Hello",
-            namespace: Namespace::default(),
-            fields: vec![TableField {
-                name: "foo",
-                field_type: TableFieldType::Scalar(ScalarType::UInt32),
-                default: None,
-                comments: Vec::new(),
-                attributes: None,
-                attr_start: None,
-            }],
-            comments: Vec::new(),
-            attributes: Vec::new(),
-        }
+        Table::builder()
+            .name("Hello")
+            .fields(vec![
+                TableField::builder()
+                    .name("foo")
+                    .field_type(TableFieldType::Scalar(ScalarType::UInt32))
+                    .build()
+            ])
+            .build()
     )]
     #[case::comments(
         r#"// This is NOT documentation
@@ -327,39 +331,31 @@ mod tests {
             foo:uint32;
             /// This should be ignored
         }"#,
-        Table {
-            name: "Hello",
-            namespace: Namespace::default(),
-            fields: vec![TableField {
-                name: "foo",
-                field_type: TableFieldType::Scalar(ScalarType::UInt32),
-                default: None,
-                comments: Vec::new(),
-                attributes: None,
-                attr_start: None,
-            }],
-            comments: vec!["This is a comment!"],
-            attributes: Vec::new(),
-        }
+        Table::builder()
+            .name("Hello")
+            .fields(vec![
+                TableField::builder()
+                    .name("foo")
+                    .field_type(TableFieldType::Scalar(ScalarType::UInt32))
+                    .build()
+            ])
+            .comments(vec!["This is a comment!"])
+            .build()
     )]
     #[case::attributes(
         r#"table Hello (original_order) {
             foo:uint32;
         }"#,
-        Table {
-            name: "Hello",
-            namespace: Namespace::default(),
-            fields: vec![TableField {
-                name: "foo",
-                field_type: TableFieldType::Scalar(ScalarType::UInt32),
-                default: None,
-                comments: Vec::new(),
-                attributes: None,
-                attr_start: None,
-            }],
-            comments: Vec::new(),
-            attributes: vec![Attribute::OriginalOrder],
-        }
+        Table::builder()
+            .name("Hello")
+            .fields(vec![
+                TableField::builder()
+                    .name("foo")
+                    .field_type(TableFieldType::Scalar(ScalarType::UInt32))
+                    .build()
+            ])
+            .attributes(vec![Attribute::OriginalOrder])
+            .build()
     )]
     fn table_pass(#[case] item_str: &str, #[case] output: Table) {
         let state = ParserState::new();
@@ -397,52 +393,38 @@ mod tests {
     #[rstest]
     #[case::simple(
         "foo:uint32;",
-        TableField {
-            name: "foo",
-            field_type: TableFieldType::Scalar(ScalarType::UInt32),
-            default: None,
-            comments: Vec::new(),
-            attributes: None,
-            attr_start: None,
-        }
+        TableField::builder()
+            .name("foo")
+            .field_type(TableFieldType::Scalar(ScalarType::UInt32))
+            .build()
     )]
     #[case::comments(
         r#"/// Foo comment
         foo:uint32;"#,
-        TableField {
-            name: "foo",
-            field_type: TableFieldType::Scalar(ScalarType::UInt32),
-            default: None,
-            comments: vec!["Foo comment"],
-            attributes: None,
-            attr_start: None,
-        }
+        TableField::builder()
+            .name("foo")
+            .field_type(TableFieldType::Scalar(ScalarType::UInt32))
+            .comments(vec!["Foo comment"])
+            .build()
     )]
     #[case::attributes(
         "foo:uint32 (id: 1);",
-        TableField {
-            name: "foo",
-            field_type: TableFieldType::Scalar(ScalarType::UInt32),
-            default: None,
-            comments: Vec::new(),
-            attributes: Some(AttributesWrapper {
+        TableField::builder()
+            .name("foo")
+            .field_type(TableFieldType::Scalar(ScalarType::UInt32))
+            .attributes(AttributesWrapper {
                 attrs: vec![Attribute::Id(1)],
                 attr_chks: Vec::new(),
                 id: None
-            }),
-            attr_start: None,
-        }
+            })
+            .build()
     )]
     #[case::whitespace(
         "\n foo \n : \n uint32 \n ;",
-        TableField {
-            name: "foo",
-            field_type: TableFieldType::Scalar(ScalarType::UInt32),
-            default: None,
-            comments: Vec::new(),
-            attributes: None,
-            attr_start: None,
-        }
+        TableField::builder()
+            .name("foo")
+            .field_type(TableFieldType::Scalar(ScalarType::UInt32))
+            .build()
     )]
     fn table_field_pass(#[case] item_str: &str, #[case] output: TableField) {
         let state = ParserState::new();
@@ -458,14 +440,7 @@ mod tests {
     #[case::missing_colon("foo uint32;")]
     #[case::missing_semicolon("foo:uint32")]
     fn table_field_fail(#[case] item_str: &str) {
-        let mut state = ParserState::new();
-
-        let mut foo_decl = TypeDecls::new();
-        foo_decl.add_tables(["Table1"]);
-
-        let decls = HashMap::from([("".into(), foo_decl.clone())]);
-
-        state.extend_decls(decls);
+        let state = ParserState::new();
 
         let mut require_id = None;
         assert!(table_field(&state, &mut HashSet::new(), &mut require_id)
