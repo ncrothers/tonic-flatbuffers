@@ -32,6 +32,11 @@ pub trait TypeName {
 
 impl_typename!(i8, u8, i16, u16, i32, u32, i64, u64, f32, f64);
 
+pub(crate) trait ByteSize {
+    /// Returns the size in bytes of the type when serialized
+    fn size(&self) -> usize;
+}
+
 pub fn parse_to_scalar<T>(input: &mut &str) -> PResult<T>
 where
     T: FromStr,

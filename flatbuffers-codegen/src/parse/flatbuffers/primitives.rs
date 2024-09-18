@@ -9,7 +9,7 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, NamedType, ParserState},
-    utils::{ident, resolved_ident, whitespace_and_comments_opt},
+    utils::{ident, resolved_ident, whitespace_and_comments_opt, ByteSize},
 };
 
 #[derive(Debug, PartialEq)]
@@ -149,6 +149,47 @@ impl ScalarType {
                 | Self::Int64
                 | Self::UInt64
         )
+    }
+}
+
+impl ByteSize for ScalarType {
+    fn size(&self) -> usize {
+        match self {
+            // 8-bit types
+            ScalarType::Int8 | ScalarType::UInt8 | ScalarType::Bool => 1,
+            // 16-bit types
+            ScalarType::Int16 | ScalarType::UInt16 => 2,
+            // 32-bit types
+            ScalarType::Int32 | ScalarType::UInt32 | ScalarType::Float32 => 4,
+            // 64-bit types
+            ScalarType::Int64 | ScalarType::UInt64 | ScalarType::Float64 => 8,
+        }
+    }
+}
+
+impl<'a> ByteSize for StructFieldType<'a> {
+    fn size(&self) -> usize {
+        match self {
+            // Size of the item * number of items
+            StructFieldType::Array(array) => array.item_type.size() * array.length,
+            StructFieldType::Named(named_type) => named_type.size(),
+            StructFieldType::Scalar(scalar_type) => scalar_type.size(),
+        }
+    }
+}
+
+impl<'a> ByteSize for ArrayItemType<'a> {
+    fn size(&self) -> usize {
+        match self {
+            ArrayItemType::Named(named_type) => named_type.size(),
+            ArrayItemType::Scalar(scalar_type) => scalar_type.size(),
+        }
+    }
+}
+
+impl<'a> ByteSize for NamedType<'a> {
+    fn size(&self) -> usize {
+        todo!("implement once NamedType has access to the actual type")
     }
 }
 

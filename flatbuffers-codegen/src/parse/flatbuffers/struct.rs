@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::ParserState,
-    utils::{ident, whitespace_all, whitespace_and_comments_opt},
+    utils::{ident, whitespace_all, whitespace_and_comments_opt, ByteSize},
 };
 
 use super::{
@@ -33,6 +33,23 @@ pub struct Struct<'a> {
     pub fields: Vec<StructField<'a>>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
+}
+
+impl<'a> ByteSize for Struct<'a> {
+    fn size(&self) -> usize {
+        self.fields
+            .iter()
+            .map(|field| {
+                field.size()
+            })
+            .sum()
+    }
+}
+
+impl<'a> ByteSize for StructField<'a> {
+    fn size(&self) -> usize {
+        self.field_type.size()
+    }
 }
 
 fn struct_field<'a, 's: 'a>(
