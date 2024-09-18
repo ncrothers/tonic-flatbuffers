@@ -3,9 +3,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use flatbuffers_codegen::parse::parser::{
+use flatbuffers_codegen::{generate::FlatbuffersGenerator, parse::{flatbuffers::item::Item, parser::{
     collect_includes, get_namespaced_decls, parse_file, ParserState,
-};
+}}};
 
 /// Converts a relative path into absolute
 pub fn absolute<P: AsRef<Path>>(path: P) -> std::io::Result<PathBuf> {
@@ -44,6 +44,10 @@ pub fn get_include_paths(file: &str, include_paths: &[PathBuf]) -> anyhow::Resul
 
     Ok(includes)
 }
+
+struct Dummy;
+
+impl FlatbuffersGenerator for Dummy {}
 
 fn main() {
     // let input = r#"
@@ -107,5 +111,16 @@ fn main() {
 
         println!("Items found:");
         println!("{items:#?}");
+        
+        for item in &items {
+            if let Item::Struct(item) = item {
+                let tokens = Dummy.generate_struct(item);
+
+                let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
+
+                println!("Generated impl:");
+                println!("{output}");
+            }
+        }
     }
 }

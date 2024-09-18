@@ -20,19 +20,19 @@ use super::{
 
 #[derive(Debug, PartialEq)]
 pub struct StructField<'a> {
-    name: &'a str,
-    field_type: StructFieldType<'a>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub field_type: StructFieldType<'a>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Struct<'a> {
-    name: &'a str,
-    namespace: &'a str,
-    fields: Vec<StructField<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub namespace: &'a str,
+    pub fields: Vec<StructField<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn struct_field<'a, 's: 'a>(

@@ -16,6 +16,8 @@ table Response {
 
 struct Struct1 {
     foo:uint;
+    bar:bool;
+    struct:[uint:5];
 }
 
 union Union {

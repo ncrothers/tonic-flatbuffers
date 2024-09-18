@@ -1,3 +1,14 @@
+pub mod generate {
+    mod traits;
+    pub use traits::*;
+
+    mod generator {
+        pub mod r#struct;
+
+        pub mod utils;
+    }
+}
+
 pub mod parse {
     pub mod flatbuffers {
         pub mod attributes;
