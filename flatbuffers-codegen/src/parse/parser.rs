@@ -9,7 +9,7 @@ use winnow::{
     PResult, Parser,
 };
 
-use crate::flatbuffers::item::{item, namespace, Item};
+use super::flatbuffers::item::{item, namespace, Item};
 
 #[derive(Debug, PartialEq)]
 pub enum DeclType {

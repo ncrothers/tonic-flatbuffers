@@ -10,7 +10,7 @@ use winnow::{
     Parser,
 };
 
-use crate::{
+use crate::parse::{
     parser::ParserState,
     utils::{ident, string_literal, whitespace_and_comments_opt},
 };

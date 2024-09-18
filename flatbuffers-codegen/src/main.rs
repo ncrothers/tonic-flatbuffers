@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use flatbuffers_codegen::parser::{
+use flatbuffers_codegen::parse::parser::{
     collect_includes, get_namespaced_decls, parse_file, ParserState,
 };
 

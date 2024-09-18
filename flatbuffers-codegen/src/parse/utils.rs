@@ -9,7 +9,7 @@ use winnow::{
     PResult, Parser,
 };
 
-use crate::{
+use super::{
     flatbuffers::primitives::{DefaultValue, ScalarType, TableFieldType},
     parser::{DeclType, NamedType, ParserState},
 };
@@ -292,7 +292,7 @@ mod tests {
 
     use rstest::rstest;
 
-    use crate::parser::TypeDecls;
+    use super::super::parser::TypeDecls;
 
     use super::*;
 

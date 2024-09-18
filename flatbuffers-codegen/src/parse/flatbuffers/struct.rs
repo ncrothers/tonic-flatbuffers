@@ -8,7 +8,7 @@ use winnow::{
     Parser,
 };
 
-use crate::{
+use crate::parse::{
     parser::ParserState,
     utils::{ident, whitespace_all, whitespace_and_comments_opt},
 };
@@ -147,7 +147,7 @@ mod tests {
 
     use rstest::rstest;
 
-    use crate::{flatbuffers::primitives::ScalarType, parser::TypeDecls};
+    use crate::parse::{flatbuffers::primitives::ScalarType, parser::TypeDecls};
 
     use super::*;
 

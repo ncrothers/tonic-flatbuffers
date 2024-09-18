@@ -8,7 +8,7 @@ use winnow::{
     Parser,
 };
 
-use crate::{
+use crate::parse::{
     flatbuffers::primitives::scalar_type,
     parser::ParserState,
     utils::{ident, whitespace_and_comments_opt, TypeName},
