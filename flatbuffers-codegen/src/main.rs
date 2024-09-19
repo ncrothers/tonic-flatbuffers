@@ -1,13 +1,12 @@
 use std::{
-    io,
-    path::{Path, PathBuf},
+    collections::HashMap, io, path::{Path, PathBuf}
 };
 
 use flatbuffers_codegen::{
     generate::FlatbuffersGenerator,
     parse::{
         flatbuffers::item::Item,
-        parser::{collect_includes, get_namespaced_decls, parse_file, ParserState},
+        parser::{collect_includes, get_namespaced_decls, load_file_strs, parse_file, ParserState}, utils::Namespace,
     },
 };
 
@@ -77,54 +76,87 @@ fn main() {
                 ));
             }
             let path = absolute(path)?;
-            // Unwrap is safe because it only returns Err if the path ends in `..`, which
-            // will never happen because it's an absolute path
-            let file_content = std::fs::read_to_string(path)?;
-            Ok(file_content)
+            Ok(path)
+            // // Unwrap is safe because it only returns Err if the path ends in `..`, which
+            // // will never happen because it's an absolute path
+            // let file_content = std::fs::read_to_string(path)?;
+            // Ok(file_content)
         })
         .collect::<Result<Vec<_>, anyhow::Error>>()
         .unwrap();
 
-    for file in files_to_compile.iter() {
-        let mut state = ParserState::new();
-        let cur_includes = get_include_paths(file, &include_paths).unwrap();
+    // Load all of the files we will be parsing into memory (including all files in an `include` directive, recursively)
+    // We have to parse _everything_ because we need to know the size of every object so it can be represented
+    // properly in the generated code
+    let all_files = load_file_strs(&files_to_compile, &include_paths).unwrap();
 
-        let include_files = cur_includes
-            .into_iter()
-            .map(std::fs::read_to_string)
-            .collect::<Result<Vec<_>, io::Error>>()
-            .unwrap();
+    let mut state = ParserState::new();
 
-        let decls = include_files
-            .iter()
-            .map(|content| get_namespaced_decls(content).map_err(|e| anyhow::format_err!("{e}")));
-
-        for decl in decls {
-            let decl = decl.unwrap();
-            state.extend_decls(decl);
-        }
-
-        // Preprocess this file to get all definitions
-        let cur_decls = get_namespaced_decls(file).unwrap();
-        state.extend_decls(cur_decls);
-
-        println!("State:");
-        println!("{state:#?}");
-
-        let items = parse_file(file, &state).unwrap();
-
-        println!("Items found:");
-        println!("{items:#?}");
-
-        for item in &items {
-            if let Item::Struct(item) = item {
-                let tokens = Dummy.generate_struct(item);
-
-                let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
-
-                println!("Generated impl:");
-                println!("{output}");
-            }
-        }
+    // First, populate the ParserState with all of the found item declarations used for resolving types
+    for file_str in all_files.values() {
+        let decls = get_namespaced_decls(file_str).unwrap();
+        state.extend_decls(decls);
     }
+
+    println!("State: {state:#?}");
+
+    let mut parsed_items = Vec::new();
+
+    for file_str in all_files.values() {
+        // Reset the namespace
+        state.set_namespace(Namespace::new());
+
+        let items = parse_file(file_str, &state).unwrap();
+        parsed_items.extend(items);
+    }
+
+    // // Now, we group all items by namespace
+    // let parsed_items = parsed_items
+    //     .into_iter()
+    //     .fold(HashMap::new(), |mut agg, item| {
+    //         let ns = item.nam
+    //     });
+
+    // for file in files_to_compile.iter() {
+    //     let mut state = ParserState::new();
+    //     let cur_includes = get_include_paths(file, &include_paths).unwrap();
+
+    //     let include_files = cur_includes
+    //         .into_iter()
+    //         .map(std::fs::read_to_string)
+    //         .collect::<Result<Vec<_>, io::Error>>()
+    //         .unwrap();
+
+    //     let decls = include_files
+    //         .iter()
+    //         .map(|content| get_namespaced_decls(content).map_err(|e| anyhow::format_err!("{e}")));
+
+    //     for decl in decls {
+    //         let decl = decl.unwrap();
+    //         state.extend_decls(decl);
+    //     }
+
+    //     // Preprocess this file to get all definitions
+    //     let cur_decls = get_namespaced_decls(file).unwrap();
+    //     state.extend_decls(cur_decls);
+
+    //     println!("State:");
+    //     println!("{state:#?}");
+
+    //     let items = parse_file(file, &state).unwrap();
+
+    //     println!("Items found:");
+    //     println!("{items:#?}");
+
+    //     for item in &items {
+    //         if let Item::Struct(item) = item {
+    //             let tokens = Dummy.generate_struct(item);
+
+    //             let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
+
+    //             println!("Generated impl:");
+    //             println!("{output}");
+    //         }
+    //     }
+    // }
 }

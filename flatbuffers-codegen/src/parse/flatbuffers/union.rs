@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, ParserState},
-    utils::{ident, resolved_ident, whitespace_and_comments_opt, Namespace},
+    utils::{ident, item_ident, resolved_ident, whitespace_and_comments_opt, Namespace},
 };
 
 use super::attributes::{attribute_list, Attribute, AttributeTarget};
@@ -116,7 +116,7 @@ pub fn union_item<'a, 's: 'a>(
             literal("union").parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
-            let ident = ident.parse_next(input)?;
+            let ident = item_ident(state).parse_next(input)?;
 
             let attrs = opt(attribute_list(state, AttributeTarget::UnionItem))
                 .parse_next(input)?
@@ -140,6 +140,9 @@ pub fn union_item<'a, 's: 'a>(
             literal("}")
                 .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
                 .parse_next(input)?;
+
+            // Once parsing is successful, add this name to the state
+            state.add_parsed(state.namespace(), ident);
 
             Ok(Union {
                 name: ident,

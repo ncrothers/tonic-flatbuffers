@@ -11,7 +11,7 @@ use winnow::{
 use crate::parse::{
     flatbuffers::primitives::scalar_type,
     parser::ParserState,
-    utils::{ident, whitespace_and_comments_opt, Namespace, TypeName},
+    utils::{ident, item_ident, whitespace_and_comments_opt, Namespace, TypeName},
 };
 
 use super::{
@@ -129,7 +129,7 @@ pub fn enum_item<'a, 's: 'a>(
             literal("enum").parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
-            let ident = cut_err(ident).parse_next(input)?;
+            let ident = item_ident(state).parse_next(input)?;
             whitespace_and_comments_opt(input)?;
 
             cut_err(literal(":"))
@@ -243,6 +243,9 @@ pub fn enum_item<'a, 's: 'a>(
             cut_err(literal("}"))
                 .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
                 .parse_next(input)?;
+
+            // Once parsing is successful, add this name to the state
+            state.add_parsed(state.namespace(), ident);
 
             Ok(Enum {
                 name: ident,

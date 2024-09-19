@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, NamedType, ParserState},
-    utils::{default_value, ident, whitespace_all, whitespace_and_comments_opt, Namespace},
+    utils::{default_value, ident, item_ident, whitespace_all, whitespace_and_comments_opt, Namespace},
 };
 
 use super::{
@@ -142,7 +142,7 @@ pub fn table_item<'a, 's: 'a>(
                 .parse_next(input)?;
 
             // Get the table ident
-            let ident = cut_err(ident).parse_next(input)?;
+            let ident = item_ident(state).parse_next(input)?;
 
             let attrs = opt(attribute_list(state, AttributeTarget::TableItem))
                 .parse_next(input)?
@@ -277,6 +277,9 @@ pub fn table_item<'a, 's: 'a>(
             whitespace_and_comments_opt(input)?;
             cut_err(literal("}").context(StrContext::Expected(StrContextValue::CharLiteral('}'))))
                 .parse_next(input)?;
+
+            // Once parsing is successful, add this name to the state
+            state.add_parsed(state.namespace(), ident);
 
             Ok(Table {
                 name: ident,

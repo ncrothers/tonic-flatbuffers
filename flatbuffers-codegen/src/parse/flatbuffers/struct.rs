@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::ParserState,
-    utils::{ident, whitespace_all, whitespace_and_comments_opt, ByteSize, Namespace},
+    utils::{ident, item_ident, whitespace_all, whitespace_and_comments_opt, ByteSize, Namespace},
 };
 
 use super::{
@@ -116,7 +116,7 @@ pub fn struct_item<'a, 's: 'a>(
             literal("struct").parse_next(input)?;
 
             // Get the struct ident
-            let ident = ident.parse_next(input)?;
+            let ident = item_ident(state).parse_next(input)?;
 
             let attrs = opt(attribute_list(state, AttributeTarget::StructItem))
                 .parse_next(input)?
@@ -140,6 +140,9 @@ pub fn struct_item<'a, 's: 'a>(
             literal("}")
                 .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
                 .parse_next(input)?;
+
+            // Once parsing is successful, add this name to the state
+            state.add_parsed(state.namespace(), ident);
 
             Ok(Struct {
                 name: ident,

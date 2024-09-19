@@ -1,6 +1,5 @@
 use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
+    cell::RefCell, collections::{HashMap, HashSet}, fs, path::{Path, PathBuf}
 };
 
 use winnow::{
@@ -45,6 +44,8 @@ impl<'a> NamedType<'a> {
             decl_type,
         }
     }
+
+    // pub fn resolve(&self, )
 }
 
 impl<'a> ByteSize for NamedType<'a> {
@@ -56,6 +57,7 @@ impl<'a> ByteSize for NamedType<'a> {
 #[derive(Debug)]
 pub struct ParserState<'a> {
     cur_namespace: RefCell<Namespace<'a>>,
+    parsed_names: RefCell<HashMap<Namespace<'a>, HashSet<&'a str>>>,
     namespace_decls: HashMap<NamespaceWrapped<'a>, TypeDecls<'a>>,
 }
 
@@ -63,6 +65,7 @@ impl<'a> ParserState<'a> {
     pub fn new() -> Self {
         Self {
             cur_namespace: RefCell::new(Namespace::from("")),
+            parsed_names: RefCell::new(HashMap::new()),
             namespace_decls: HashMap::new(),
         }
     }
@@ -88,6 +91,14 @@ impl<'a> ParserState<'a> {
                 })
                 .or_insert(decls);
         }
+    }
+
+    pub fn is_already_defined(&self, ns: &Namespace<'_>, ident: &str) -> bool {
+        self.parsed_names.borrow().get(ns).map(|already_defined| already_defined.contains(ident)).unwrap_or(false)
+    }
+
+    pub fn add_parsed(&self, ns: Namespace<'a>, ident: &'a str) {
+        self.parsed_names.borrow_mut().entry(ns).or_default().insert(ident);
     }
 
     fn resolve_ident_recursive(
@@ -202,6 +213,8 @@ pub fn collect_includes(file: &str) -> Vec<&str> {
         .collect()
 }
 
+
+
 pub fn parse_file<'a>(file: &'a str, state: &ParserState<'a>) -> anyhow::Result<Vec<Item<'a>>> {
     // Reset the current namespace
     *state.cur_namespace.borrow_mut() = Namespace::default();
@@ -241,4 +254,80 @@ pub fn get_namespaced_decls(file: &str) -> PResult<HashMap<Namespace, TypeDecls<
     }
 
     Ok(map)
+}
+
+/// Converts a relative path into absolute
+pub fn absolute<P: AsRef<Path>>(path: P) -> std::io::Result<PathBuf> {
+    let cur_dir = std::env::current_dir()?;
+
+    Ok(path_clean::clean(cur_dir.join(path)))
+}
+
+/// Load _all_ files recursively until everything that we will need to parse is in memory
+pub fn load_file_strs(
+    files: &[PathBuf],
+    include_paths: &[PathBuf],
+) -> anyhow::Result<HashMap<PathBuf, String>> {
+    let mut loaded = HashMap::new();
+
+    for file in files {
+        load_file_recursive(file, &mut loaded, include_paths)?;
+    }
+
+    Ok(loaded)
+}
+
+fn load_file_recursive(
+    file_path: &Path,
+    loaded: &mut HashMap<PathBuf, String>,
+    include_paths: &[PathBuf],
+) -> anyhow::Result<()> {
+    let file_str = fs::read_to_string(file_path)?;
+
+    // Get all included files and load them if not already loaded
+    let includes = get_include_paths(&file_str, include_paths)?;
+    for include in includes {
+        // Load this include file if we haven't already
+        if !loaded.contains_key(&include) {
+            load_file_recursive(&include, loaded, include_paths)?;
+        }
+    }
+
+    loaded.insert(file_path.to_owned(), file_str);
+
+    Ok(())
+}
+
+pub fn get_include_paths(file: &str, include_paths: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
+    // Get the include declarations from the file
+    let includes = collect_includes(file)
+        .into_iter()
+        .map(|path_str| resolve_include(path_str, include_paths))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(includes)
+}
+
+fn resolve_include(path_str: &str, include_paths: &[PathBuf]) -> anyhow::Result<PathBuf> {
+    let path = PathBuf::from(path_str);
+
+    // Import a file on the first matched include, in order. This is how
+    // protoc and flatc do it; even if there are multiple files with the
+    // same name that resolve the import, only import the first one
+    include_paths
+        .iter()
+        .filter_map(|include_path| {
+            let joined = include_path.join(&path);
+            if std::fs::File::open(&joined).is_ok() {
+                Some(joined)
+            } else {
+                None
+            }
+        })
+        .next()
+        .ok_or_else(|| {
+            anyhow::format_err!(
+                "couldn't locate file \"{path_str}\" in any of the include directories"
+            )
+        })
 }

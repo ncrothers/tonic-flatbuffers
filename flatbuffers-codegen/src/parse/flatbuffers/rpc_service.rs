@@ -10,7 +10,7 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, NamedType, ParserState},
-    utils::{ident, resolved_ident, whitespace_all, whitespace_and_comments_opt, Namespace},
+    utils::{ident, item_ident, resolved_ident, whitespace_all, whitespace_and_comments_opt, Namespace},
 };
 
 use super::attributes::{attribute_list, Attribute, AttributeTarget};
@@ -144,7 +144,7 @@ pub fn rpc_service_item<'a, 's: 'a>(
             literal("rpc_service").parse_next(input)?;
 
             // Get the ident
-            let ident = ident.parse_next(input)?;
+            let ident = item_ident(state).parse_next(input)?;
 
             let attrs = opt(attribute_list(state, AttributeTarget::StructItem))
                 .parse_next(input)?
@@ -168,6 +168,9 @@ pub fn rpc_service_item<'a, 's: 'a>(
             cut_err(literal("}"))
                 .context(StrContext::Expected(StrContextValue::StringLiteral("}")))
                 .parse_next(input)?;
+
+            // Once parsing is successful, add this name to the state
+            state.add_parsed(state.namespace(), ident);
 
             Ok(RpcService {
                 name: ident,
