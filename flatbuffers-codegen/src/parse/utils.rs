@@ -236,7 +236,7 @@ pub fn default_value<'a, 's>(
 
 /// Parse a namespaced ident, checking against the allowed types from [`ParserState`]
 pub fn resolved_ident<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     decl_types: &'a [DeclType],
 ) -> impl Parser<&'s str, NamedType<'s>, ContextError> + 'a {
     |input: &mut _| {
@@ -367,24 +367,11 @@ pub fn string_literal<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::S
     .parse_next(input)
 }
 
-pub(crate) mod test_utils {
-    use crate::parse::flatbuffers::item::Item;
-
-    #[allow(unused)]
-    pub(crate) fn placeholder_item() -> &'static Item<'static> {
-        &Item::Attribute("")
-    }
-}
-
-#[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use rstest::rstest;
-    use test_utils::placeholder_item;
-
-    use crate::parse::flatbuffers::r#struct::Struct;
 
     use super::super::parser::TypeDecls;
 
@@ -407,14 +394,14 @@ mod tests {
     }
 
     #[rstest]
-    #[case::simple("foo", NamedType { ident: "foo", namespace: "".into(), decl_type: DeclType::Struct, item_ref: placeholder_item() })]
-    #[case::nested("namespace.foo", NamedType { ident: "foo", namespace: "namespace".into(), decl_type: DeclType::Struct, item_ref: placeholder_item() })]
-    #[case::nested("one.two.three.foo", NamedType { ident: "foo", namespace: "one.two.three".into(),decl_type: DeclType::Struct, item_ref: placeholder_item() })]
+    #[case::simple("foo", NamedType { ident: "foo", namespace: "".into(), decl_type: DeclType::Struct })]
+    #[case::nested("namespace.foo", NamedType { ident: "foo", namespace: "namespace".into(), decl_type: DeclType::Struct })]
+    #[case::nested("one.two.three.foo", NamedType { ident: "foo", namespace: "one.two.three".into(),decl_type: DeclType::Struct })]
     fn resolved_ident_pass(#[case] item_str: &str, #[case] output: NamedType) {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs([Struct::builder().name("foo").build()]);
+        foo_decl.add_structs(["foo"]);
 
         let decls = HashMap::from([
             ("".into(), foo_decl.clone()),
@@ -438,7 +425,7 @@ mod tests {
         let mut state = ParserState::new();
 
         let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs([Struct::builder().name("foo").build()]);
+        foo_decl.add_structs(["foo"]);
 
         let decls = HashMap::from([
             ("".into(), foo_decl.clone()),

@@ -7,7 +7,7 @@ use flatbuffers_codegen::{
     generate::FlatbuffersGenerator,
     parse::{
         flatbuffers::item::Item,
-        parser::{collect_includes, get_namespaced_decls, load_file_strs, parse_file, ParserState},
+        parser::{collect_includes, get_namespaced_decls, parse_file, ParserState},
     },
 };
 
@@ -66,7 +66,7 @@ fn main() {
 
     let include_paths = vec![PathBuf::from("../examples/helloworld/fbs")];
 
-    let compile_paths = glob::glob("../examples/helloworld/fbs/service.fbs")
+    let files_to_compile = glob::glob("../examples/helloworld/fbs/service.fbs")
         .unwrap()
         .map(|path| {
             let path = path?;
@@ -77,21 +77,13 @@ fn main() {
                 ));
             }
             let path = absolute(path)?;
-            Ok(path)
+            // Unwrap is safe because it only returns Err if the path ends in `..`, which
+            // will never happen because it's an absolute path
+            let file_content = std::fs::read_to_string(path)?;
+            Ok(file_content)
         })
         .collect::<Result<Vec<_>, anyhow::Error>>()
         .unwrap();
-
-    // let files_to_compile = 
-    //         // Unwrap is safe because it only returns Err if the path ends in `..`, which
-    //         // will never happen because it's an absolute path
-    //         let file_content = std::fs::read_to_string(path)?;
-    //         Ok(file_content)
-    //     })
-    //     .collect::<Result<Vec<_>, anyhow::Error>>()
-    //     .unwrap();
-
-    let all_files = load_file_strs(&compile_paths, &include_paths).unwrap();
 
     for file in files_to_compile.iter() {
         let mut state = ParserState::new();

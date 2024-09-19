@@ -1,5 +1,6 @@
 use std::{
-    cell::RefCell, collections::{HashMap, HashSet}, fs, ops::{Deref, DerefMut}, path::{Path, PathBuf}
+    cell::RefCell,
+    collections::{HashMap, HashSet},
 };
 
 use winnow::{
@@ -9,11 +10,11 @@ use winnow::{
 };
 
 use super::{
-    flatbuffers::{r#enum::Enum, item::{item, namespace, Item}, r#struct::Struct, table::Table, union::Union},
+    flatbuffers::item::{item, namespace, Item},
     utils::{ByteSize, Namespace, NamespaceWrapped},
 };
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum DeclType {
     Enum,
     Struct,
@@ -26,16 +27,15 @@ impl DeclType {
     pub const ANY: &'static [Self] = &[Self::Enum, Self::Struct, Self::Table, Self::Union];
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, PartialEq)]
 pub struct NamedType<'a> {
     pub ident: &'a str,
     pub namespace: Namespace<'a>,
     pub decl_type: DeclType,
-    pub item_ref: &'a Item<'a>,
 }
 
 impl<'a> NamedType<'a> {
-    pub fn new<N>(ident: &'a str, namespace: N, decl_type: DeclType, item: &'a Item<'a>) -> Self
+    pub fn new<N>(ident: &'a str, namespace: N, decl_type: DeclType) -> Self
     where
         N: Into<Namespace<'a>> + 'a,
     {
@@ -43,15 +43,7 @@ impl<'a> NamedType<'a> {
             ident,
             namespace: namespace.into(),
             decl_type,
-            item_ref: item,
         }
-    }
-}
-
-impl<'a> PartialEq for NamedType<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        // Don't compare the item_ref when checking equality
-        self.ident == other.ident && self.namespace == other.namespace && self.decl_type == other.decl_type
     }
 }
 
@@ -84,21 +76,22 @@ impl<'a> ParserState<'a> {
     }
 
     pub fn extend_decls(&mut self, decls: HashMap<Namespace<'a>, TypeDecls<'a>>) {
-        for (ns, mut decls) in decls {
+        for (ns, decls) in decls {
             let ns = NamespaceWrapped(ns);
             self.namespace_decls
                 .entry(ns)
                 .and_modify(|existing| {
-                    for (decl_type, data) in decls.data.drain() {
-                        existing.data.entry(decl_type).or_default().extend(data);
-                    }
+                    existing.enums.extend(&decls.enums);
+                    existing.structs.extend(&decls.structs);
+                    existing.tables.extend(&decls.tables);
+                    existing.unions.extend(&decls.unions);
                 })
                 .or_insert(decls);
         }
     }
 
     fn resolve_ident_recursive(
-        &'a self,
+        &self,
         ns: &Namespace<'_>,
         ident: &str,
         decl_types: &[DeclType],
@@ -107,9 +100,28 @@ impl<'a> ParserState<'a> {
         if let Some((ns, decls)) = self.namespace_decls.get_key_value(ns) {
             // Try to match against all the provided types
             for ty in decl_types {
-                if let Some(item) = decls.get_decl(ident, *ty) {
-                    return Some(NamedType::new(item.ident(), ns.0.clone(), *ty, item));
-                }
+                match ty {
+                    DeclType::Enum => {
+                        if let Some(ident) = decls.enums.get(ident) {
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Enum));
+                        }
+                    }
+                    DeclType::Struct => {
+                        if let Some(ident) = decls.structs.get(ident) {
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Struct));
+                        }
+                    }
+                    DeclType::Table => {
+                        if let Some(ident) = decls.tables.get(ident) {
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Table));
+                        }
+                    }
+                    DeclType::Union => {
+                        if let Some(ident) = decls.unions.get(ident) {
+                            return Some(NamedType::new(ident, ns.0.clone(), DeclType::Union));
+                        }
+                    }
+                };
             }
 
             // When no namespace left to check, we can return
@@ -126,7 +138,7 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    pub fn resolve_any(&'a self, ident: &str, ty: &[DeclType]) -> Option<NamedType<'a>> {
+    pub fn resolve_any(&self, ident: &str, ty: &[DeclType]) -> Option<NamedType<'a>> {
         let (ns, ident) = ident.rsplit_once('.').unwrap_or(("", ident));
 
         self.resolve_ident_recursive(&Namespace::new_raw(ns), ident, ty)
@@ -141,9 +153,10 @@ impl<'a> Default for ParserState<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct TypeDecls<'a> {
-    // TODO: Switched from HashSet to Vec because Items can't be hashed
-    // use a different data structure for faster lookups?
-    data: HashMap<DeclType, Vec<Item<'a>>>,
+    structs: HashSet<&'a str>,
+    enums: HashSet<&'a str>,
+    unions: HashSet<&'a str>,
+    tables: HashSet<&'a str>,
 }
 
 impl<'a> TypeDecls<'a> {
@@ -151,61 +164,17 @@ impl<'a> TypeDecls<'a> {
         Self::default()
     }
 
-    pub fn get_decl<'b>(&'a self, ident: &'b str, decl_type: DeclType) -> Option<&'a Item<'a>>
-    where
-        'a: 'b,
-    {
-        self.data
-            .get(&decl_type)
-            .and_then(|items| items.iter().find(|item| {
-                match item {
-                    Item::Enum(val) => val.name == ident,
-                    Item::Struct(val) => val.name == ident,
-                    Item::Table(val) => val.name == ident,
-                    Item::Union(val) => val.name == ident,
-                    _ => unreachable!("Non-item attempted to match in TypeDecls::get_decl"),
-                }
-            }))
+    pub fn add_structs(&mut self, values: impl IntoIterator<Item = &'a str>) {
+        self.structs.extend(values);
     }
-
-    pub fn add_structs(&mut self, values: impl IntoIterator<Item = Struct<'a>>) {
-        self.data.entry(DeclType::Struct).or_default().extend(values.into_iter().map(Item::Struct));
+    pub fn add_enums(&mut self, values: impl IntoIterator<Item = &'a str>) {
+        self.enums.extend(values);
     }
-
-    pub fn add_enums(&mut self, values: impl IntoIterator<Item = Enum<'a>>) {
-        self.data.entry(DeclType::Enum).or_default().extend(values.into_iter().map(Item::Enum));
+    pub fn add_tables(&mut self, values: impl IntoIterator<Item = &'a str>) {
+        self.tables.extend(values);
     }
-
-    pub fn add_tables(&mut self, values: impl IntoIterator<Item = Table<'a>>) {
-        self.data.entry(DeclType::Table).or_default().extend(values.into_iter().map(Item::Table));
-    }
-
-    pub fn add_unions(&mut self, values: impl IntoIterator<Item = Union<'a>>) {
-        self.data.entry(DeclType::Union).or_default().extend(values.into_iter().map(Item::Union));
-    }
-
-    pub fn add_all(&mut self, values: impl IntoIterator<Item = Item<'a>>) {
-        for item in values.into_iter() {
-            self.add_any(item);
-        }
-    }
-
-    pub fn add_any(&mut self, item: Item<'a>) {
-        match &item {
-            Item::Enum(_) => {
-                self.data.entry(DeclType::Enum).or_default().push(item);
-            }
-            Item::Struct(_) => {
-                self.data.entry(DeclType::Struct).or_default().push(item);
-            }
-            Item::Table(_) => {
-                self.data.entry(DeclType::Table).or_default().push(item);
-            }
-            Item::Union(_) => {
-                self.data.entry(DeclType::Union).or_default().push(item);
-            }
-            _ => ()
-        }
+    pub fn add_unions(&mut self, values: impl IntoIterator<Item = &'a str>) {
+        self.unions.extend(values);
     }
 }
 
@@ -233,118 +202,43 @@ pub fn collect_includes(file: &str) -> Vec<&str> {
         .collect()
 }
 
-pub fn parse_file<'a>(
-    file_str: &'a str,
-    state: &'a ParserState<'a>,
-    include_paths: &[PathBuf],
-    loaded: &'a HashMap<PathBuf, String>,
-    parsed_types: &mut HashMap<Namespace<'a>, TypeDecls<'a>>,
-    parsed_files: &mut HashSet<PathBuf>,
-) -> anyhow::Result<Vec<Item<'a>>> {
+pub fn parse_file<'a>(file: &'a str, state: &ParserState<'a>) -> anyhow::Result<Vec<Item<'a>>> {
     // Reset the current namespace
     *state.cur_namespace.borrow_mut() = Namespace::default();
 
-    let mut buffer = file_str;
-    let buffer = &mut buffer;
-
-    let mut items = Vec::new();
-
-    while !buffer.is_empty() {
-        let item = item(state)
-            .parse_next(buffer)
-            .map_err(|e| anyhow::format_err!("{e}"))?;
-
-        if let Item::Include(include_path) = &item {
-            let include_path = resolve_include(include_path, include_paths)?;
-
-            let prev_namespace = state.namespace();
-
-            if !parsed_files.contains(&include_path) {
-                let include_file_str = loaded.get(&include_path).unwrap();
-
-                let items = parse_file(include_file_str, state, include_paths, loaded, parsed_types, parsed_files)?;
-
-                for item in items {
-                    
-                }
-            }
-
-            *state.cur_namespace.borrow_mut() = prev_namespace;
-        }
-
-        items.push(item);
-    }
-
-    Ok(items)
+    trace("parse_file", repeat(0.., item(state)))
+        .parse(file)
+        .map_err(|e| anyhow::format_err!("{e}"))
 }
 
-/// Converts a relative path into absolute
-pub fn absolute<P: AsRef<Path>>(path: P) -> std::io::Result<PathBuf> {
-    let cur_dir = std::env::current_dir()?;
+pub fn get_namespaced_decls(file: &str) -> PResult<HashMap<Namespace, TypeDecls<'_>>> {
+    let mut file = file;
 
-    Ok(path_clean::clean(cur_dir.join(path)))
-}
+    let input = &mut file;
 
-/// Load _all_ files recursively until everything that we will need to parse is in memory
-pub fn load_file_strs(files: &[PathBuf], include_paths: &[PathBuf]) -> anyhow::Result<HashMap<PathBuf, String>> {
-    let mut loaded = HashMap::new();
-    
-    for file in files {
-        load_file_recursive(file, &mut loaded, include_paths)?;
-    }
+    let mut map = HashMap::new();
 
-    Ok(loaded)
-}
+    let state = ParserState::new();
 
-fn load_file_recursive(file_path: &Path, loaded: &mut HashMap<PathBuf, String>, include_paths: &[PathBuf]) -> anyhow::Result<()> {
-    let file_str = fs::read_to_string(file_path)?;
+    while !input.is_empty() {
+        let pre_namespace_text = alt((take_until(0.., "namespace"), rest)).parse_next(input)?;
 
-    // Get all included files and load them if not already loaded
-    let includes = get_include_paths(&file_str, include_paths)?;
-    for include in includes {
-        // Load this include file if we haven't already
-        if !loaded.contains_key(&include) {
-            load_file_recursive(file_path, loaded, include_paths)?;
+        let structs = collect_type_decls(pre_namespace_text, "struct");
+        let enums = collect_type_decls(pre_namespace_text, "enum");
+        let tables = collect_type_decls(pre_namespace_text, "table");
+        let unions = collect_type_decls(pre_namespace_text, "union");
+
+        let ns_entry: &mut TypeDecls = map.entry(state.namespace()).or_default();
+
+        ns_entry.structs.extend(structs);
+        ns_entry.enums.extend(enums);
+        ns_entry.tables.extend(tables);
+        ns_entry.unions.extend(unions);
+
+        if !input.is_empty() {
+            namespace(&state).parse_next(input)?;
         }
     }
 
-    loaded.insert(file_path.to_owned(), file_str);
-
-    Ok(())
-}
-
-pub fn get_include_paths(file: &str, include_paths: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
-    // Get the include declarations from the file
-    let includes = collect_includes(file)
-        .into_iter()
-        .map(|path_str| {
-            resolve_include(path_str, include_paths)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(includes)
-}
-
-fn resolve_include(path_str: &str, include_paths: &[PathBuf]) -> anyhow::Result<PathBuf> {
-    let path = PathBuf::from(path_str);
-
-    // Import a file on the first matched include, in order. This is how
-    // protoc and flatc do it; even if there are multiple files with the
-    // same name that resolve the import, only import the first one
-    include_paths
-        .iter()
-        .filter_map(|include_path| {
-            let joined = include_path.join(&path);
-            if std::fs::File::open(&joined).is_ok() {
-                Some(joined)
-            } else {
-                None
-            }
-        })
-        .next()
-        .ok_or_else(|| {
-            anyhow::format_err!(
-                "couldn't locate file \"{path_str}\" in any of the include directories"
-            )
-        })
+    Ok(map)
 }
