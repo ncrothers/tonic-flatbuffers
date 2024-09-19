@@ -50,7 +50,7 @@ pub struct RpcService<'a> {
 }
 
 fn rpc_method_parameter<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, NamedType<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("rpc_method_parameter", |input: &mut _| {
@@ -75,7 +75,7 @@ fn rpc_method_parameter<'a, 's: 'a>(
 }
 
 fn rpc_method<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, RpcMethod<'s>, ContextError> + 'a {
     move |input: &mut _| {
@@ -143,7 +143,7 @@ fn rpc_method<'a, 's: 'a>(
 }
 
 pub fn rpc_service_item<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, RpcService<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("rpc_service", |input: &mut _| {
@@ -192,11 +192,14 @@ pub fn rpc_service_item<'a, 's: 'a>(
 #[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, rc::Rc};
 
     use rstest::rstest;
 
-    use crate::parse::{flatbuffers::table::Table, parser::{DeclType, NamedType, TypeDecls}, utils::test_utils::placeholder_item};
+    use crate::parse::{
+        flatbuffers::table::Table,
+        parser::{NamedType, ParsedTypes},
+    };
 
     use super::*;
 
@@ -210,8 +213,8 @@ mod tests {
             .methods(vec![
                 RpcMethod::builder()
                     .name("HelloWorld")
-                    .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
-                    .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+                    .parameter(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
+                    .return_type(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
                     .build()
             ])
             .build()
@@ -226,8 +229,8 @@ mod tests {
             .methods(vec![
                 RpcMethod::builder()
                     .name("HelloWorld")
-                    .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
-                    .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+                    .parameter(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
+                    .return_type(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
                     .build()
             ])
             .comments(vec!["Service comment"])
@@ -235,7 +238,7 @@ mod tests {
     )]
     fn rpc_service_pass(#[case] item_str: &str, #[case] output: RpcService) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
+        let mut decl = ParsedTypes::new();
         decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
@@ -256,7 +259,7 @@ mod tests {
     )]
     fn rpc_service_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
+        let mut decl = ParsedTypes::new();
         decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
@@ -269,16 +272,16 @@ mod tests {
         "HelloWorld(Table1) : Table1;",
         RpcMethod::builder()
             .name("HelloWorld")
-            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
-            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .parameter(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
+            .return_type(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
             .build()
     )]
     #[case::whitespace(
         " \n HelloWorld \n ( \n Table1 \n ) \n : \n Table1 \n;",
         RpcMethod::builder()
             .name("HelloWorld")
-            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
-            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .parameter(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
+            .return_type(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
             .build()
     )]
     #[case::comments(
@@ -286,8 +289,8 @@ mod tests {
         HelloWorld(Table1) : Table1;"#,
         RpcMethod::builder()
             .name("HelloWorld")
-            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
-            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .parameter(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
+            .return_type(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
             .comments(vec!["Method comment"])
             .build()
     )]
@@ -295,14 +298,14 @@ mod tests {
         "HelloWorld(Table1) : Table1 (streaming: \"bidi\");",
         RpcMethod::builder()
             .name("HelloWorld")
-            .parameter(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
-            .return_type(NamedType::new("Table1", "", DeclType::Table, placeholder_item()))
+            .parameter(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
+            .return_type(NamedType::new(Rc::new(Table::builder().name("Table1").build().into())))
             .attributes(vec![Attribute::Streaming(StreamingMode::Bidirectional)])
             .build()
     )]
     fn rpc_method_pass(#[case] item_str: &str, #[case] output: RpcMethod) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
+        let mut decl = ParsedTypes::new();
         decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));
@@ -320,7 +323,7 @@ mod tests {
     #[case::missing_semicolon("HelloWorld(Table1):Table1")]
     fn rpc_method_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
+        let mut decl = ParsedTypes::new();
         decl.add_tables([Table::builder().name("Table1").build()]);
 
         state.extend_decls(HashMap::from([("".into(), decl)]));

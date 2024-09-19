@@ -199,7 +199,7 @@ impl<'a> Attribute<'a> {
 }
 
 fn parse_attribute<'a, 's: 'a>(
-    _state: &'s ParserState<'s>,
+    _state: &'a ParserState<'s>,
     target: AttributeTarget,
 ) -> impl Parser<&'s str, (Attribute<'s>, StrCheckpoint<'s>), ContextError> + 'a {
     move |input: &mut _| {
@@ -273,7 +273,7 @@ fn parse_attribute<'a, 's: 'a>(
 }
 
 pub fn attribute_list<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     target: AttributeTarget,
 ) -> impl Parser<&'s str, AttributesWrapper<'s>, ContextError> + 'a {
     move |input: &mut _| {

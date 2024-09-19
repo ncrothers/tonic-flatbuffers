@@ -55,7 +55,7 @@ impl<'a> ByteSize for StructField<'a> {
 }
 
 fn struct_field<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, StructField<'s>, ContextError> + 'a {
     move |input: &mut _| {
@@ -114,7 +114,7 @@ fn struct_field<'a, 's: 'a>(
 }
 
 pub fn struct_item<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Struct<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("struct", |input: &mut _| {
@@ -167,7 +167,10 @@ mod tests {
 
     use rstest::rstest;
 
-    use crate::parse::{flatbuffers::{primitives::ScalarType, table::Table}, parser::TypeDecls};
+    use crate::parse::{
+        flatbuffers::{primitives::ScalarType, table::Table},
+        parser::ParsedTypes,
+    };
 
     use super::*;
 
@@ -306,7 +309,7 @@ mod tests {
     fn struct_field_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
+        let mut foo_decl = ParsedTypes::new();
         foo_decl.add_tables([Table::builder().name("Table1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);

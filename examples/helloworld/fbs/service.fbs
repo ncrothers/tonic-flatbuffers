@@ -4,11 +4,16 @@ namespace example.service;
 
 attribute "custom_attr";
 
+table Table {
+    foo:Request;
+}
+
 table Request {
     foo:
     /// Comment goes here
     uint;
     bar:string;
+    foobar:Table;
 }
 
 table Response {
@@ -16,15 +21,15 @@ table Response {
     struct:string;
 }
 
+struct Response {
+    foo:uin32;
+}
+
 struct Struct1 {
     foo:uint;
     bar:bool;
     struct:[uint:5];
     hello:bla.Hello;
-}
-
-union Union {
-    Request,
 }
 
 root_type Request;

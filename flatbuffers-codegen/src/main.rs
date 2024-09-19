@@ -82,7 +82,7 @@ fn main() {
         .collect::<Result<Vec<_>, anyhow::Error>>()
         .unwrap();
 
-    // let files_to_compile = 
+    // let files_to_compile =
     //         // Unwrap is safe because it only returns Err if the path ends in `..`, which
     //         // will never happen because it's an absolute path
     //         let file_content = std::fs::read_to_string(path)?;

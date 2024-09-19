@@ -188,7 +188,7 @@ impl<'a> ByteSize for ArrayItemType<'a> {
 }
 
 pub fn array_type<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Array<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("array_type", |input: &mut _| {
@@ -231,7 +231,7 @@ pub fn array_type<'a, 's: 'a>(
 }
 
 pub fn struct_field_type<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, StructFieldType<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("struct_field_type", |input: &mut _| {
@@ -257,7 +257,7 @@ pub fn struct_field_type<'a, 's: 'a>(
 }
 
 pub fn vector_type<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, VectorItemType<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("vector_type", |input: &mut _| {
@@ -291,7 +291,7 @@ pub fn vector_type<'a, 's: 'a>(
 }
 
 pub fn table_field_type<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, TableFieldType<'s>, ContextError> + 'a {
     |input: &mut _| {
         trace("table_field_type", |i: &mut _| {
@@ -343,11 +343,11 @@ pub fn scalar_type(input: &mut &str) -> PResult<ScalarType> {
 #[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, rc::Rc};
 
     use rstest::rstest;
 
-    use crate::parse::{flatbuffers::{r#struct::Struct, table::Table}, parser::TypeDecls, utils::test_utils::placeholder_item};
+    use crate::parse::{flatbuffers::{r#struct::Struct, table::Table}, parser::ParsedTypes};
 
     use super::*;
 
@@ -391,16 +391,16 @@ mod tests {
     #[case::string("[string]", VectorItemType::String)]
     #[case::named_(
         "[foo]",
-        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct, placeholder_item(),))
+        VectorItemType::Named(NamedType::new(Rc::new(Struct::builder().name("foo").build().into())))
     )]
     #[case::whitespace(
         "[ \nfoo\n ]",
-        VectorItemType::Named(NamedType::new("foo", "", DeclType::Struct, placeholder_item(),))
+        VectorItemType::Named(NamedType::new(Rc::new(Struct::builder().name("foo").build().into())))
     )]
     fn vector_wrapped_pass(#[case] item_str: &str, #[case] output: VectorItemType) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
+        let mut foo_decl = ParsedTypes::new();
         foo_decl.add_structs([Struct::builder().name("foo").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
@@ -454,12 +454,7 @@ mod tests {
     #[case::named(
         "[Struct1:1500000]",
         Array {
-            item_type: ArrayItemType::Named(NamedType::new(
-                "Struct1",
-                "",
-                DeclType::Struct,
-                placeholder_item(),
-            )),
+            item_type: ArrayItemType::Named(NamedType::new(Rc::new(Struct::builder().name("Struct1").build().into()))),
             length: 1_500_000,
         },
     )]
@@ -473,7 +468,7 @@ mod tests {
     fn array_pass(#[case] item_str: &str, #[case] output: Array) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
+        let mut foo_decl = ParsedTypes::new();
         foo_decl.add_structs([Struct::builder().name("Struct1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
@@ -492,7 +487,7 @@ mod tests {
     fn array_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
+        let mut foo_decl = ParsedTypes::new();
         foo_decl.add_tables([Table::builder().name("Table1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
@@ -508,10 +503,7 @@ mod tests {
         "Struct1",
         StructFieldType::Named(
             NamedType::new(
-                "Struct1",
-                "",
-                DeclType::Struct,
-                placeholder_item(),
+                Rc::new(Struct::builder().name("Struct1").build().into())
             )
         ),
     )]
@@ -525,7 +517,7 @@ mod tests {
     fn struct_field_type_pass(#[case] item_str: &str, #[case] output: StructFieldType) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
+        let mut foo_decl = ParsedTypes::new();
         foo_decl.add_structs([Struct::builder().name("Struct1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);
@@ -542,7 +534,7 @@ mod tests {
     fn struct_field_type_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
+        let mut foo_decl = ParsedTypes::new();
         foo_decl.add_tables([Table::builder().name("Table1").build()]);
 
         let decls = HashMap::from([("".into(), foo_decl.clone())]);

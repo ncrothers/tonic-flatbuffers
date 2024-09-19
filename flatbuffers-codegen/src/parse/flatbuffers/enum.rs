@@ -16,6 +16,7 @@ use crate::parse::{
 
 use super::{
     attributes::{attribute_list, Attribute, AttributeTarget},
+    item::Item,
     primitives::ScalarType,
 };
 
@@ -65,7 +66,7 @@ pub struct Enum<'a> {
 }
 
 fn enum_variant<'a, 's: 'a, T>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, EnumVariant<'s, T>, ContextError> + 'a
 where
@@ -128,7 +129,7 @@ where
 }
 
 pub fn enum_item<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Enum<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("enum", |input: &mut _| {
@@ -172,7 +173,7 @@ pub fn enum_item<'a, 's: 'a>(
                 .parse_next(input)?;
 
             fn parse_variants<'a, 's: 'a, T: FromStr + TypeName>(
-                state: &'s ParserState<'s>,
+                state: &'a ParserState<'s>,
             ) -> impl Parser<&'s str, Vec<EnumVariant<'s, T>>, ContextError> + 'a {
                 move |input: &mut _| {
                     let mut field_idents = HashSet::new();

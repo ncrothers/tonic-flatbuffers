@@ -9,7 +9,7 @@ use winnow::{
 };
 
 use crate::parse::{
-    parser::{DeclType, ParserState},
+    parser::{DeclType, NamedType, ParserState},
     utils::{ident, resolved_ident, whitespace_and_comments_opt, Namespace},
 };
 
@@ -24,7 +24,7 @@ pub struct UnionVariant<'a> {
     pub name: &'a str,
     /// Will be the same as `name` when no alias is given
     #[cfg_attr(feature = "builder", builder(!default))]
-    pub actual_type: &'a str,
+    pub actual_type: NamedType<'a>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
 }
@@ -42,7 +42,7 @@ pub struct Union<'a> {
 }
 
 fn union_variant<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
 ) -> impl Parser<&'s str, UnionVariant<'s>, ContextError> + 'a {
     move |input: &mut _| {
@@ -85,7 +85,6 @@ fn union_variant<'a, 's: 'a>(
             // Parse the actual type, must be a table
             let actual_type = cut_err(resolved_ident(state, &[DeclType::Table]))
                 .context(StrContext::Label("union variant type"))
-                .map(|val| val.ident)
                 .parse_next(input)?;
 
             whitespace_and_comments_opt(input)?;
@@ -98,7 +97,11 @@ fn union_variant<'a, 's: 'a>(
 
             // If aliased, the name is the ident
             // Otherwise, the name is the same as the actual type
-            let name = if is_aliased { ident } else { actual_type };
+            let name = if is_aliased {
+                ident
+            } else {
+                actual_type.ident()
+            };
 
             field_idents.insert(name);
 
@@ -114,7 +117,7 @@ fn union_variant<'a, 's: 'a>(
 }
 
 pub fn union_item<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Union<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("union", |input: &mut _| {
@@ -163,11 +166,11 @@ pub fn union_item<'a, 's: 'a>(
 #[cfg(feature = "builder")]
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, rc::Rc};
 
     use rstest::rstest;
 
-    use crate::parse::{flatbuffers::table::Table, parser::TypeDecls};
+    use crate::parse::{flatbuffers::table::Table, parser::ParsedTypes};
 
     use super::*;
 
@@ -182,11 +185,11 @@ mod tests {
             .variants(vec![
                 UnionVariant::builder()
                     .name("Variant1")
-                    .actual_type("Variant1")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant1").build().into())))
                     .build(),
                 UnionVariant::builder()
                     .name("Variant2")
-                    .actual_type("Variant2")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant2").build().into())))
                     .build(),
             ])
             .build()
@@ -202,11 +205,11 @@ mod tests {
             .variants(vec![
                 UnionVariant::builder()
                     .name("Variant1")
-                    .actual_type("Variant1")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant1").build().into())))
                     .build(),
                 UnionVariant::builder()
                     .name("Variant2")
-                    .actual_type("Variant2")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant2").build().into())))
                     .build(),
             ])
             .comments(vec!["This is a comment!"])
@@ -222,11 +225,11 @@ mod tests {
             .variants(vec![
                 UnionVariant::builder()
                     .name("Variant1")
-                    .actual_type("Variant1")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant1").build().into())))
                     .build(),
                 UnionVariant::builder()
                     .name("Variant2")
-                    .actual_type("Variant2")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant2").build().into())))
                     .build(),
             ])
             .attributes(vec![Attribute::Custom { name: "custom_attr", value: None }])
@@ -242,18 +245,18 @@ mod tests {
             .variants(vec![
                 UnionVariant::builder()
                     .name("Variant1")
-                    .actual_type("Variant1")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant1").build().into())))
                     .build(),
                 UnionVariant::builder()
                     .name("Variant2")
-                    .actual_type("Variant1")
+                    .actual_type(NamedType(Rc::new(Table::builder().name("Variant1").build().into())))
                     .build(),
             ])
             .build()
     )]
     fn union_pass(#[case] item_str: &str, #[case] output: Union) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
+        let mut decl = ParsedTypes::new();
         decl.add_tables([
             Table::builder().name("Variant1").build(),
             Table::builder().name("Variant2").build(),
@@ -288,7 +291,7 @@ mod tests {
     )]
     fn union_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
-        let mut decl = TypeDecls::new();
+        let mut decl = ParsedTypes::new();
         decl.add_tables([
             Table::builder().name("Variant1").build(),
             Table::builder().name("Variant2").build(),

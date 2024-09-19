@@ -236,7 +236,7 @@ pub fn default_value<'a, 's>(
 
 /// Parse a namespaced ident, checking against the allowed types from [`ParserState`]
 pub fn resolved_ident<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     decl_types: &'a [DeclType],
 ) -> impl Parser<&'s str, NamedType<'s>, ContextError> + 'a {
     |input: &mut _| {
@@ -368,11 +368,13 @@ pub fn string_literal<'s>(input: &mut &'s str) -> PResult<<&'s str as Stream>::S
 }
 
 pub(crate) mod test_utils {
+    use std::rc::Rc;
+
     use crate::parse::flatbuffers::item::Item;
 
     #[allow(unused)]
-    pub(crate) fn placeholder_item() -> &'static Item<'static> {
-        &Item::Attribute("")
+    pub(crate) fn placeholder_item() -> Rc<Item<'static>> {
+        Rc::new(Item::Attribute(""))
     }
 }
 
@@ -380,13 +382,13 @@ pub(crate) mod test_utils {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::rc::Rc;
 
     use rstest::rstest;
-    use test_utils::placeholder_item;
 
     use crate::parse::flatbuffers::r#struct::Struct;
 
-    use super::super::parser::TypeDecls;
+    use super::super::parser::ParsedTypes;
 
     use super::*;
 
@@ -407,19 +409,46 @@ mod tests {
     }
 
     #[rstest]
-    #[case::simple("foo", NamedType { ident: "foo", namespace: "".into(), decl_type: DeclType::Struct, item_ref: placeholder_item() })]
-    #[case::nested("namespace.foo", NamedType { ident: "foo", namespace: "namespace".into(), decl_type: DeclType::Struct, item_ref: placeholder_item() })]
-    #[case::nested("one.two.three.foo", NamedType { ident: "foo", namespace: "one.two.three".into(),decl_type: DeclType::Struct, item_ref: placeholder_item() })]
+    #[case::simple("foo", NamedType(Rc::new(Struct::builder().name("foo").build().into())))]
+    #[case::nested("namespace.foo", NamedType(Rc::new(Struct::builder().name("foo").namespace(Namespace::from("namespace")).build().into())))]
+    #[case::nested("one.two.three.foo", NamedType(Rc::new(Struct::builder().name("foo").namespace(Namespace::from("one.two.three")).build().into())))]
     fn resolved_ident_pass(#[case] item_str: &str, #[case] output: NamedType) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
-        foo_decl.add_structs([Struct::builder().name("foo").build()]);
-
         let decls = HashMap::from([
-            ("".into(), foo_decl.clone()),
-            ("namespace".into(), foo_decl.clone()),
-            ("one.two.three".into(), foo_decl.clone()),
+            (
+                "".into(),
+                ParsedTypes::from(HashMap::from([(
+                    DeclType::Struct,
+                    vec![Rc::new(Struct::builder().name("foo").build().into())],
+                )])),
+            ),
+            (
+                "namespace".into(),
+                ParsedTypes::from(HashMap::from([(
+                    DeclType::Struct,
+                    vec![Rc::new(
+                        Struct::builder()
+                            .name("foo")
+                            .namespace("namespace".into())
+                            .build()
+                            .into(),
+                    )],
+                )])),
+            ),
+            (
+                "one.two.three".into(),
+                ParsedTypes::from(HashMap::from([(
+                    DeclType::Struct,
+                    vec![Rc::new(
+                        Struct::builder()
+                            .name("foo")
+                            .namespace("one.two.three".into())
+                            .build()
+                            .into(),
+                    )],
+                )])),
+            ),
         ]);
 
         state.extend_decls(decls);
@@ -437,7 +466,7 @@ mod tests {
     fn resolved_ident_fail(#[case] item_str: &str) {
         let mut state = ParserState::new();
 
-        let mut foo_decl = TypeDecls::new();
+        let mut foo_decl = ParsedTypes::new();
         foo_decl.add_structs([Struct::builder().name("foo").build()]);
 
         let decls = HashMap::from([

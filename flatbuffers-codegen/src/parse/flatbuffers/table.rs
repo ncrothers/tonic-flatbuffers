@@ -9,12 +9,13 @@ use winnow::{
 };
 
 use crate::parse::{
-    parser::{DeclType, NamedType, ParserState},
+    parser::{NamedType, ParserState},
     utils::{default_value, ident, whitespace_all, whitespace_and_comments_opt, Namespace},
 };
 
 use super::{
     attributes::{attribute_list, Attribute, AttributeTarget, AttributesWrapper, StrCheckpoint},
+    item::Item,
     primitives::{table_field_type, DefaultValue, TableFieldType},
 };
 
@@ -58,7 +59,7 @@ pub struct Table<'a> {
 }
 
 fn table_field<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
     require_id: &'a mut Option<bool>,
 ) -> impl Parser<&'s str, TableField<'s>, ContextError> + 'a {
@@ -139,7 +140,7 @@ fn table_field<'a, 's: 'a>(
 }
 
 pub fn table_item<'a, 's: 'a>(
-    state: &'s ParserState<'s>,
+    state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Table<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("table", |input: &mut _| {
@@ -230,7 +231,7 @@ pub fn table_item<'a, 's: 'a>(
                                     if let Attribute::Id(field_id) = attr {
                                         has_id = true;
                                         // A union takes up 2 spots, so its index should be i+1
-                                        if matches!(field.field_type, TableFieldType::Named(NamedType { ident: _, namespace: _, decl_type: DeclType::Union, item_ref: _ })) {
+                                        if matches!(&field.field_type, TableFieldType::Named(NamedType(item)) if matches!(item.as_ref(), Item::Union(_))) {
                                             if *field_id == 0 {
                                                 err!(chk, "id; union ids can only be 1 at the lowest");
                                             }
