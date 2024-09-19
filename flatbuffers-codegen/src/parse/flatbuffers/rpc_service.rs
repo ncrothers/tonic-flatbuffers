@@ -10,7 +10,9 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, NamedType, ParserState},
-    utils::{ident, item_ident, resolved_ident, whitespace_all, whitespace_and_comments_opt, Namespace},
+    utils::{
+        ident, item_ident, resolved_ident, whitespace_all, whitespace_and_comments_opt, Namespace,
+    },
 };
 
 use super::attributes::{attribute_list, Attribute, AttributeTarget};
@@ -25,20 +27,20 @@ pub enum StreamingMode {
 
 #[derive(Debug, PartialEq)]
 pub struct RpcMethod<'a> {
-    name: &'a str,
-    parameter: NamedType<'a>,
-    return_type: NamedType<'a>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub parameter: NamedType<'a>,
+    pub return_type: NamedType<'a>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct RpcService<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    methods: Vec<RpcMethod<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    pub methods: Vec<RpcMethod<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn rpc_method_parameter<'a, 's: 'a>(

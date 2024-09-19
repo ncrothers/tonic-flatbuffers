@@ -18,20 +18,20 @@ use super::attributes::{attribute_list, Attribute, AttributeTarget};
 #[derive(Debug, PartialEq)]
 pub struct UnionVariant<'a> {
     /// Name of the variant
-    name: &'a str,
+    pub name: &'a str,
     /// Will be the same as `name` when no alias is given
-    actual_type: &'a str,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub actual_type: &'a str,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Union<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    variants: Vec<UnionVariant<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    pub variants: Vec<UnionVariant<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn union_variant<'a, 's: 'a>(

@@ -1,12 +1,18 @@
 use std::{
-    collections::HashMap, io, path::{Path, PathBuf}
+    collections::HashMap,
+    io,
+    path::{Path, PathBuf},
 };
 
 use flatbuffers_codegen::{
     generate::FlatbuffersGenerator,
     parse::{
         flatbuffers::item::Item,
-        parser::{collect_includes, get_namespaced_decls, load_file_strs, parse_file, ParserState}, utils::Namespace,
+        parser::{
+            collect_includes, get_namespaced_decls, load_file_strs, parse_file, ParsedTypes,
+            ParserState,
+        },
+        utils::Namespace,
     },
 };
 
@@ -110,12 +116,15 @@ fn main() {
         parsed_items.extend(items);
     }
 
-    // // Now, we group all items by namespace
-    // let parsed_items = parsed_items
-    //     .into_iter()
-    //     .fold(HashMap::new(), |mut agg, item| {
-    //         let ns = item.nam
-    //     });
+    // Now, we group all items by namespace
+    let parsed_items = parsed_items
+        .into_iter()
+        .fold(ParsedTypes::new(), |mut agg, item| {
+            agg.insert(item);
+            agg
+        });
+
+    println!("Parsed types: {parsed_items:#?}");
 
     // for file in files_to_compile.iter() {
     //     let mut state = ParserState::new();

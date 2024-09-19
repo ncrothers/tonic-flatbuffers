@@ -10,7 +10,9 @@ use winnow::{
 
 use crate::parse::{
     parser::{DeclType, NamedType, ParserState},
-    utils::{default_value, ident, item_ident, whitespace_all, whitespace_and_comments_opt, Namespace},
+    utils::{
+        default_value, ident, item_ident, whitespace_all, whitespace_and_comments_opt, Namespace,
+    },
 };
 
 use super::{
@@ -20,12 +22,12 @@ use super::{
 
 #[derive(Debug)]
 pub struct TableField<'a> {
-    name: &'a str,
-    field_type: TableFieldType<'a>,
-    default: Option<DefaultValue<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Option<AttributesWrapper<'a>>,
-    attr_start: Option<StrCheckpoint<'a>>,
+    pub name: &'a str,
+    pub field_type: TableFieldType<'a>,
+    pub default: Option<DefaultValue<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Option<AttributesWrapper<'a>>,
+    pub attr_start: Option<StrCheckpoint<'a>>,
 }
 
 impl<'a> PartialEq for TableField<'a> {
@@ -40,11 +42,11 @@ impl<'a> PartialEq for TableField<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct Table<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    fields: Vec<TableField<'a>>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    pub fields: Vec<TableField<'a>>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn table_field<'a, 's: 'a>(

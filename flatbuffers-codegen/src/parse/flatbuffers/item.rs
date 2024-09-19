@@ -37,6 +37,48 @@ pub enum Item<'a> {
     Union(Union<'a>),
 }
 
+impl<'a> Item<'a> {
+    /// If this is an item definition that has an identifier (one of the below types),
+    /// returns its identifier
+    ///
+    /// Types that return an identifier:
+    /// * `Item::Enum`
+    /// * `Item::RpcService`
+    /// * `Item::Struct`
+    /// * `Item::Table`
+    /// * `Item::Union`
+    pub fn ident(&self) -> Option<&'a str> {
+        match self {
+            Item::Enum(item) => Some(item.name),
+            Item::RpcService(item) => Some(item.name),
+            Item::Struct(item) => Some(item.name),
+            Item::Table(item) => Some(item.name),
+            Item::Union(item) => Some(item.name),
+            _ => None,
+        }
+    }
+
+    /// If this is an item definition that has an namespace (one of the below types),
+    /// returns its namespace
+    ///
+    /// Types that return a namespace:
+    /// * `Item::Enum`
+    /// * `Item::RpcService`
+    /// * `Item::Struct`
+    /// * `Item::Table`
+    /// * `Item::Union`
+    pub fn namespace(&self) -> Option<&Namespace<'a>> {
+        match self {
+            Item::Enum(item) => Some(&item.namespace),
+            Item::RpcService(item) => Some(&item.namespace),
+            Item::Struct(item) => Some(&item.namespace),
+            Item::Table(item) => Some(&item.namespace),
+            Item::Union(item) => Some(&item.namespace),
+            _ => None,
+        }
+    }
+}
+
 pub fn item<'a, 's: 'a>(
     state: &'a ParserState<'s>,
 ) -> impl Parser<&'s str, Item<'s>, ContextError> + 'a {

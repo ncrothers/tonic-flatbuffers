@@ -21,10 +21,10 @@ use super::{
 
 #[derive(Debug, PartialEq)]
 pub struct EnumVariant<'a, T> {
-    name: &'a str,
-    idx: Option<T>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub idx: Option<T>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -49,11 +49,11 @@ pub enum EnumData<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct Enum<'a> {
-    name: &'a str,
-    namespace: Namespace<'a>,
-    variants: EnumData<'a>,
-    comments: Vec<&'a str>,
-    attributes: Vec<Attribute<'a>>,
+    pub name: &'a str,
+    pub namespace: Namespace<'a>,
+    pub variants: EnumData<'a>,
+    pub comments: Vec<&'a str>,
+    pub attributes: Vec<Attribute<'a>>,
 }
 
 fn enum_variant<'a, 's: 'a, T>(

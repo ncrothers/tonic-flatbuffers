@@ -285,13 +285,15 @@ pub fn ident<'s>(input: &mut &'s str) -> PResult<&'s str> {
 
 /// Parses an [`ident`] and checks if this type has already been defined in the
 /// current namespace. If so, it returns `Err`.
-pub(crate) fn item_ident<'a, 's: 'a>(state: &'a ParserState<'s>) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
+pub(crate) fn item_ident<'a, 's: 'a>(
+    state: &'a ParserState<'s>,
+) -> impl Parser<&'s str, &'s str, ContextError> + 'a {
     |input: &mut _| {
         trace("item_ident", |input: &mut &'s str| {
             let before_ident = input.checkpoint();
-            
+
             let ident = cut_err(ident).parse_next(input)?;
-        
+
             // Check if this name has already been defined in this namespace
             if state.is_already_defined(&state.namespace(), ident) {
                 input.reset(&before_ident);

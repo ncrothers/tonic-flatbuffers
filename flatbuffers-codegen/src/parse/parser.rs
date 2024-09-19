@@ -1,5 +1,8 @@
 use std::{
-    cell::RefCell, collections::{HashMap, HashSet}, fs, path::{Path, PathBuf}
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
 };
 
 use winnow::{
@@ -44,8 +47,6 @@ impl<'a> NamedType<'a> {
             decl_type,
         }
     }
-
-    // pub fn resolve(&self, )
 }
 
 impl<'a> ByteSize for NamedType<'a> {
@@ -94,11 +95,19 @@ impl<'a> ParserState<'a> {
     }
 
     pub fn is_already_defined(&self, ns: &Namespace<'_>, ident: &str) -> bool {
-        self.parsed_names.borrow().get(ns).map(|already_defined| already_defined.contains(ident)).unwrap_or(false)
+        self.parsed_names
+            .borrow()
+            .get(ns)
+            .map(|already_defined| already_defined.contains(ident))
+            .unwrap_or(false)
     }
 
     pub fn add_parsed(&self, ns: Namespace<'a>, ident: &'a str) {
-        self.parsed_names.borrow_mut().entry(ns).or_default().insert(ident);
+        self.parsed_names
+            .borrow_mut()
+            .entry(ns)
+            .or_default()
+            .insert(ident);
     }
 
     fn resolve_ident_recursive(
@@ -162,6 +171,34 @@ impl<'a> Default for ParserState<'a> {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ParsedTypes<'a>(pub(crate) HashMap<Namespace<'a>, HashMap<&'a str, Item<'a>>>);
+
+impl<'a> ParsedTypes<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, item: Item<'a>) {
+        if let Some((ns, ident)) = item
+            .ident()
+            .and_then(|ident| item.namespace().map(|ns| (ns, ident)))
+        {
+            self.0.entry(ns.clone()).or_default().insert(ident, item);
+        }
+    }
+
+    /// Given a [`NamedType`], return a reference to the [`Item`] it actually points to.
+    ///
+    /// TODO: Care must be taken that only types defined in files that are included in
+    /// the file the parent type was defined
+    pub fn resolve_named(&self, named_type: &NamedType<'a>) -> Option<&Item<'a>> {
+        self.0
+            .get(&named_type.namespace)
+            .and_then(|items| items.get(named_type.ident))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TypeDecls<'a> {
     structs: HashSet<&'a str>,
@@ -212,8 +249,6 @@ pub fn collect_includes(file: &str) -> Vec<&str> {
         .filter_map(|val| val.map(|x| x.as_str()))
         .collect()
 }
-
-
 
 pub fn parse_file<'a>(file: &'a str, state: &ParserState<'a>) -> anyhow::Result<Vec<Item<'a>>> {
     // Reset the current namespace
