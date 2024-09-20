@@ -11,7 +11,7 @@ use winnow::{
 
 use super::{
     flatbuffers::primitives::{DefaultValue, ScalarType, TableFieldType},
-    parser::{DeclType, NamedType, ParserState},
+    parser::{DeclType, NamedType, ParsedTypes, ParserState},
 };
 
 macro_rules! impl_typename {
@@ -107,9 +107,36 @@ impl<'a: 'b, 'b> std::borrow::Borrow<Namespace<'b>> for NamespaceWrapped<'a> {
     }
 }
 
+pub(crate) type OffsetType = u16;
+
+/// Converts a field idx into an offset
+pub fn field_idx_to_offset(field_idx: OffsetType) -> OffsetType {
+    const SIZE_BYTES: u32 = OffsetType::BITS / 8;
+
+    let fixed_fields = 2 * SIZE_BYTES as u16;
+    let offset = OffsetType::checked_add(
+        fixed_fields,
+        OffsetType::checked_mul(field_idx, SIZE_BYTES as OffsetType).expect("integer overflow when calculating offset")
+    ).expect("integer overflow when calculating offset");
+
+    offset
+}
+
+/// Efficient way to calculate the number of bytes needed to pad
+pub(crate) fn padding_bytes(buf_size: usize, scalar_size: usize) -> usize {
+    usize::wrapping_add(!buf_size, 1) & (scalar_size - 1)
+}
+
 pub trait ByteSize {
-    /// Returns the size in bytes of the type when serialized
-    fn size(&self) -> usize;
+    /// Returns the size in bytes of the type when serialized. Requires the set of
+    /// parsed types to be passed in so that field types can be resolved and calculated
+    /// recursively.
+    fn size(&self, parsed_types: &ParsedTypes) -> usize;
+}
+
+pub trait Alignment {
+    /// Returns the alignment in bytes of this type
+    fn alignment(&self, parsed_types: &ParsedTypes) -> usize;
 }
 
 pub fn parse_to_scalar<T>(input: &mut &str) -> PResult<T>

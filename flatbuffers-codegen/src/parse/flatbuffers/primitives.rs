@@ -8,8 +8,8 @@ use winnow::{
 };
 
 use crate::parse::{
-    parser::{DeclType, NamedType, ParserState},
-    utils::{ident, resolved_ident, whitespace_and_comments_opt, ByteSize},
+    parser::{DeclType, NamedType, ParsedTypes, ParserState},
+    utils::{ident, resolved_ident, whitespace_and_comments_opt, Alignment, ByteSize},
 };
 
 #[derive(Debug, PartialEq)]
@@ -22,6 +22,15 @@ pub struct Array<'a> {
 pub enum ArrayItemType<'a> {
     Named(NamedType<'a>),
     Scalar(ScalarType),
+}
+
+impl<'a> Alignment for ArrayItemType<'a> {
+    fn alignment(&self, parsed_types: &ParsedTypes) -> usize {
+        match self {
+            ArrayItemType::Named(named_type) => named_type.alignment(parsed_types),
+            ArrayItemType::Scalar(scalar_type) => scalar_type.size(parsed_types),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -153,7 +162,7 @@ impl ScalarType {
 }
 
 impl ByteSize for ScalarType {
-    fn size(&self) -> usize {
+    fn size(&self, _parsed_types: &ParsedTypes) -> usize {
         match self {
             // 8-bit types
             ScalarType::Int8 | ScalarType::UInt8 | ScalarType::Bool => 1,
@@ -168,21 +177,21 @@ impl ByteSize for ScalarType {
 }
 
 impl<'a> ByteSize for StructFieldType<'a> {
-    fn size(&self) -> usize {
+    fn size(&self, parsed_types: &ParsedTypes) -> usize {
         match self {
             // Size of the item * number of items
-            StructFieldType::Array(array) => array.item_type.size() * array.length,
-            StructFieldType::Named(named_type) => named_type.size(),
-            StructFieldType::Scalar(scalar_type) => scalar_type.size(),
+            StructFieldType::Array(array) => array.item_type.size(parsed_types) * array.length,
+            StructFieldType::Named(named_type) => named_type.size(parsed_types),
+            StructFieldType::Scalar(scalar_type) => scalar_type.size(parsed_types),
         }
     }
 }
 
 impl<'a> ByteSize for ArrayItemType<'a> {
-    fn size(&self) -> usize {
+    fn size(&self, parsed_types: &ParsedTypes) -> usize {
         match self {
-            ArrayItemType::Named(named_type) => named_type.size(),
-            ArrayItemType::Scalar(scalar_type) => scalar_type.size(),
+            ArrayItemType::Named(named_type) => named_type.size(parsed_types),
+            ArrayItemType::Scalar(scalar_type) => scalar_type.size(parsed_types),
         }
     }
 }

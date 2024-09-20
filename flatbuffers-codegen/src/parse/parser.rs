@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fs,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, rc::Rc,
 };
 
 use winnow::{
@@ -13,7 +13,7 @@ use winnow::{
 
 use super::{
     flatbuffers::item::{item, namespace, Item},
-    utils::{ByteSize, Namespace, NamespaceWrapped},
+    utils::{Alignment, ByteSize, Namespace, NamespaceWrapped},
 };
 
 #[derive(Debug, PartialEq)]
@@ -50,8 +50,24 @@ impl<'a> NamedType<'a> {
 }
 
 impl<'a> ByteSize for NamedType<'a> {
-    fn size(&self) -> usize {
-        todo!("implement once NamedType has access to the actual type")
+    fn size(&self, parsed_types: &ParsedTypes) -> usize {
+        // TODO: Remove unwrap
+        let resolved_item = parsed_types.resolve_named(self).unwrap();
+        let resolved_item = &*resolved_item.borrow();
+        resolved_item.size(parsed_types)
+    }
+}
+
+impl<'a> Alignment for NamedType<'a> {
+    fn alignment(&self, parsed_types: &ParsedTypes) -> usize {
+        let resolved_item = parsed_types.resolve_named(self).unwrap();
+        let resolved_item = &*resolved_item.borrow();
+
+        if let Item::Struct(struct_) = resolved_item {
+            struct_.alignment(parsed_types)
+        } else {
+            resolved_item.size(parsed_types)
+        }
     }
 }
 
@@ -172,7 +188,7 @@ impl<'a> Default for ParserState<'a> {
 }
 
 #[derive(Debug, Default)]
-pub struct ParsedTypes<'a>(pub(crate) HashMap<Namespace<'a>, HashMap<&'a str, Item<'a>>>);
+pub struct ParsedTypes<'a>(pub(crate) HashMap<Namespace<'a>, HashMap<&'a str, Rc<RefCell<Item<'a>>>>>);
 
 impl<'a> ParsedTypes<'a> {
     pub fn new() -> Self {
@@ -184,7 +200,7 @@ impl<'a> ParsedTypes<'a> {
             .ident()
             .and_then(|ident| item.namespace().map(|ns| (ns, ident)))
         {
-            self.0.entry(ns.clone()).or_default().insert(ident, item);
+            self.0.entry(ns.clone()).or_default().insert(ident, Rc::new(RefCell::new(item)));
         }
     }
 
@@ -192,10 +208,14 @@ impl<'a> ParsedTypes<'a> {
     ///
     /// TODO: Care must be taken that only types defined in files that are included in
     /// the file the parent type was defined
-    pub fn resolve_named(&self, named_type: &NamedType<'a>) -> Option<&Item<'a>> {
+    pub fn resolve_named(&self, named_type: &NamedType<'_>) -> Option<Rc<RefCell<Item<'a>>>> {
         self.0
             .get(&named_type.namespace)
-            .and_then(|items| items.get(named_type.ident))
+            .and_then(|items| items.get(named_type.ident).cloned())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Namespace<'a>, &HashMap<&'a str, Rc<RefCell<Item<'a>>>>)> {
+        self.0.iter()
     }
 }
 
@@ -365,4 +385,17 @@ fn resolve_include(path_str: &str, include_paths: &[PathBuf]) -> anyhow::Result<
                 "couldn't locate file \"{path_str}\" in any of the include directories"
             )
         })
+}
+
+pub fn align_structs(items: &ParsedTypes) {
+    for ns_items in items.0.values() {
+        for item in ns_items.values() {
+            match &mut *item.borrow_mut() {
+                Item::Struct(struct_) => {
+                    struct_.position_fields(&items);
+                }
+                _ => ()
+            }
+        }
+    }
 }

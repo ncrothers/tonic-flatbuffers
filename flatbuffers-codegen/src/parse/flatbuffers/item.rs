@@ -6,10 +6,9 @@ use winnow::{
 };
 
 use crate::parse::{
-    parser::{DeclType, ParserState},
+    parser::{DeclType, ParsedTypes, ParserState},
     utils::{
-        ident, resolved_ident, string_literal, whitespace_all, whitespace_and_comments_opt,
-        whitespace_and_comments_req, Namespace,
+        ident, resolved_ident, string_literal, whitespace_all, whitespace_and_comments_opt, whitespace_and_comments_req, ByteSize, Namespace
     },
 };
 
@@ -75,6 +74,18 @@ impl<'a> Item<'a> {
             Item::Table(item) => Some(&item.namespace),
             Item::Union(item) => Some(&item.namespace),
             _ => None,
+        }
+    }
+}
+
+impl<'a> ByteSize for Item<'a> {
+    fn size(&self, parsed_types: &ParsedTypes) -> usize {
+        match self {
+            Item::Enum(item) => item.size(parsed_types),
+            Item::Struct(item) => item.size(parsed_types),
+            Item::Table(item) => todo!(),//item.size(parsed_types),
+            Item::Union(item) => todo!(),//item.size(parsed_types),
+            _ => unreachable!("make this an error instead of unreachable")
         }
     }
 }

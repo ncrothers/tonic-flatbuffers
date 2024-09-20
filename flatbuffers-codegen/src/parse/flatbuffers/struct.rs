@@ -9,8 +9,8 @@ use winnow::{
 };
 
 use crate::parse::{
-    parser::ParserState,
-    utils::{ident, item_ident, whitespace_all, whitespace_and_comments_opt, ByteSize, Namespace},
+    parser::{ParsedTypes, ParserState},
+    utils::{field_idx_to_offset, ident, item_ident, padding_bytes, whitespace_all, whitespace_and_comments_opt, Alignment, ByteSize, Namespace, OffsetType},
 };
 
 use super::{
@@ -24,6 +24,8 @@ pub struct StructField<'a> {
     pub field_type: StructFieldType<'a>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
+    pub offset: OffsetType,
+    pub padding: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -33,17 +35,64 @@ pub struct Struct<'a> {
     pub fields: Vec<StructField<'a>>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
+    pub byte_size: usize,
+    pub min_align: usize,
+}
+
+impl<'a> Struct<'a> {
+    pub fn position_fields(&mut self, parsed_types: &ParsedTypes) {
+        for idx in 0..self.fields.len() {
+            self.fields[idx].offset = field_idx_to_offset(idx as u16);
+    
+            let size = self.fields[idx].size(parsed_types);
+            let alignment = self.fields[idx].alignment(parsed_types);
+
+            self.min_align = usize::max(self.min_align, alignment);
+
+            self.pad_prev_field(idx, alignment);
+
+            self.fields[idx].offset = OffsetType::try_from(self.byte_size).expect("integer overflow for struct byte_size");
+            self.byte_size += size;
+        }
+
+        // Pad the final field
+        self.pad_prev_field(self.fields.len(), self.min_align);
+    }
+
+    fn pad_prev_field(&mut self, idx: usize, alignment: usize) {
+        let padding = padding_bytes(self.byte_size, alignment);
+        self.byte_size += padding;
+        if idx > 0 {
+            self.fields[idx-1].padding = padding;
+        }
+    }
 }
 
 impl<'a> ByteSize for Struct<'a> {
-    fn size(&self) -> usize {
-        self.fields.iter().map(|field| field.size()).sum()
+    fn size(&self, parsed_types: &ParsedTypes) -> usize {
+        self.fields.iter().map(|field| field.size(parsed_types)).sum()
+    }
+}
+
+impl<'a> Alignment for Struct<'a> {
+    fn alignment(&self, _parsed_types: &ParsedTypes) -> usize {
+        self.min_align
     }
 }
 
 impl<'a> ByteSize for StructField<'a> {
-    fn size(&self) -> usize {
-        self.field_type.size()
+    fn size(&self, parsed_types: &ParsedTypes) -> usize {
+        self.field_type.size(parsed_types)
+    }
+}
+
+impl<'a> Alignment for StructField<'a> {
+    fn alignment(&self, parsed_types: &ParsedTypes) -> usize {
+        match &self.field_type {
+            StructFieldType::Array(array) => array.item_type.alignment(parsed_types),
+            StructFieldType::Named(named_type) => named_type.alignment(parsed_types),
+            StructFieldType::Scalar(scalar_type) => scalar_type.size(parsed_types),
+        }
     }
 }
 
@@ -97,6 +146,9 @@ fn struct_field<'a, 's: 'a>(
 
             Ok(StructField {
                 name: ident,
+                // initialize offset to 0; it gets populated after parsing
+                offset: 0,
+                padding: 0,
                 field_type,
                 comments,
                 attributes: attrs.unwrap_or_default(),
@@ -150,6 +202,9 @@ pub fn struct_item<'a, 's: 'a>(
                 fields,
                 comments,
                 attributes: attrs.unwrap_or_default(),
+                // Initialize these to 0; they are set after parsing
+                byte_size: 0,
+                min_align: 0,
             })
         })
         .parse_next(input)
@@ -179,9 +234,13 @@ mod tests {
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
                 comments: Vec::new(),
                 attributes: Vec::new(),
+                offset: 0,
+                padding: 0,
             }],
             comments: Vec::new(),
             attributes: Vec::new(),
+            byte_size: 0,
+            min_align: 0,
         }
     )]
     #[case::comments(
@@ -199,9 +258,13 @@ mod tests {
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
                 comments: Vec::new(),
                 attributes: Vec::new(),
+                offset: 0,
+                padding: 0,
             }],
             comments: vec!["This is a comment!"],
             attributes: Vec::new(),
+            byte_size: 0,
+            min_align: 0,
         }
     )]
     #[case::attributes(
@@ -216,9 +279,13 @@ mod tests {
                 field_type: StructFieldType::Scalar(ScalarType::UInt32),
                 comments: Vec::new(),
                 attributes: Vec::new(),
+                offset: 0,
+                padding: 0,
             }],
             comments: Vec::new(),
             attributes: vec![Attribute::ForceAlign(10)],
+            byte_size: 0,
+            min_align: 0,
         }
     )]
     fn struct_pass(#[case] item_str: &str, #[case] output: Struct) {
@@ -262,6 +329,8 @@ mod tests {
             field_type: StructFieldType::Scalar(ScalarType::UInt32),
             comments: Vec::new(),
             attributes: Vec::new(),
+            offset: 0,
+            padding: 0,
         }
     )]
     #[case::comments(
@@ -272,6 +341,8 @@ mod tests {
             field_type: StructFieldType::Scalar(ScalarType::UInt32),
             comments: vec!["Foo comment"],
             attributes: Vec::new(),
+            offset: 0,
+            padding: 0,
         }
     )]
     #[case::attributes(
@@ -281,6 +352,8 @@ mod tests {
             field_type: StructFieldType::Scalar(ScalarType::UInt32),
             comments: Vec::new(),
             attributes: vec![Attribute::Custom { name: "custom_attr", value: None }],
+            offset: 0,
+            padding: 0,
         }
     )]
     #[case::whitespace(
@@ -290,6 +363,8 @@ mod tests {
             field_type: StructFieldType::Scalar(ScalarType::UInt32),
             comments: Vec::new(),
             attributes: Vec::new(),
+            offset: 0,
+            padding: 0,
         }
     )]
     fn struct_field_pass(#[case] item_str: &str, #[case] output: StructField) {

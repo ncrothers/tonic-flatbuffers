@@ -17,10 +17,15 @@ table Response {
 }
 
 struct Struct1 {
-    foo:uint;
-    bar:bool;
+    foo:uint32;
     struct:[uint:5];
-    hello:bla.Hello;
+    bar:bool;
+    bar2:bool;
+    bar3:bool;
+    bar4:bool;
+    foo2:uint64;
+    foo3:uint32;
+    // hello:bla.Hello;
 }
 
 union Union {

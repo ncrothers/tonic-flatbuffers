@@ -10,8 +10,8 @@ use winnow::{
 
 use crate::parse::{
     flatbuffers::primitives::scalar_type,
-    parser::ParserState,
-    utils::{ident, item_ident, whitespace_and_comments_opt, Namespace, TypeName},
+    parser::{ParsedTypes, ParserState},
+    utils::{ident, item_ident, whitespace_and_comments_opt, ByteSize, Namespace, TypeName},
 };
 
 use super::{
@@ -54,6 +54,17 @@ pub struct Enum<'a> {
     pub variants: EnumData<'a>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
+}
+
+impl<'a> ByteSize for Enum<'a> {
+    fn size(&self, _parsed_types: &ParsedTypes) -> usize {
+        match self.variants {
+            EnumData::Int8(_) | EnumData::UInt8(_) => 1,
+            EnumData::Int16(_) | EnumData::UInt16(_) => 2,
+            EnumData::Int32(_) | EnumData::UInt32(_) => 4,
+            EnumData::Int64(_) | EnumData::UInt64(_) => 8,
+        }
+    }
 }
 
 fn enum_variant<'a, 's: 'a, T>(

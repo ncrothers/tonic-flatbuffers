@@ -4,11 +4,14 @@ use quote::quote;
 
 use crate::{
     generate::generator::utils::into_valid_ident,
-    parse::{flatbuffers::r#struct::Struct, utils::ByteSize},
+    parse::{flatbuffers::r#struct::Struct, parser::ParsedTypes, utils::ByteSize},
 };
 
-pub fn generate_struct(item: &Struct) -> TokenStream {
-    let struct_size = item.size();
+pub fn generate_struct(item: &Struct, parsed_types: &ParsedTypes) -> TokenStream {
+    let struct_size = item.byte_size;
+
+    println!("Struct [{}] byte size: {struct_size}", item.name);
+    
     let item_ident = into_valid_ident(item.name, Case::Pascal);
     // Generate the debug implementation
     let debug_impl = debug(&item_ident, item);

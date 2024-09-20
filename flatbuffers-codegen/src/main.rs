@@ -9,8 +9,7 @@ use flatbuffers_codegen::{
     parse::{
         flatbuffers::item::Item,
         parser::{
-            collect_includes, get_namespaced_decls, load_file_strs, parse_file, ParsedTypes,
-            ParserState,
+            align_structs, collect_includes, get_namespaced_decls, load_file_strs, parse_file, ParsedTypes, ParserState
         },
         utils::Namespace,
     },
@@ -71,7 +70,7 @@ fn main() {
 
     let include_paths = vec![PathBuf::from("../examples/helloworld/fbs")];
 
-    let files_to_compile = glob::glob("../examples/helloworld/fbs/service.fbs")
+    let files_to_compile = glob::glob("../examples/helloworld/fbs/simple.fbs")
         .unwrap()
         .map(|path| {
             let path = path?;
@@ -126,46 +125,20 @@ fn main() {
 
     println!("Parsed types: {parsed_items:#?}");
 
-    // for file in files_to_compile.iter() {
-    //     let mut state = ParserState::new();
-    //     let cur_includes = get_include_paths(file, &include_paths).unwrap();
+    align_structs(&parsed_items);
 
-    //     let include_files = cur_includes
-    //         .into_iter()
-    //         .map(std::fs::read_to_string)
-    //         .collect::<Result<Vec<_>, io::Error>>()
-    //         .unwrap();
+    for (ns, items) in parsed_items.iter() {
+        for item in items.values() {
+            if let Item::Struct(item) = &*item.borrow() {
+                let tokens = Dummy.generate_struct(item, &parsed_items);
+    
+                let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
 
-    //     let decls = include_files
-    //         .iter()
-    //         .map(|content| get_namespaced_decls(content).map_err(|e| anyhow::format_err!("{e}")));
-
-    //     for decl in decls {
-    //         let decl = decl.unwrap();
-    //         state.extend_decls(decl);
-    //     }
-
-    //     // Preprocess this file to get all definitions
-    //     let cur_decls = get_namespaced_decls(file).unwrap();
-    //     state.extend_decls(cur_decls);
-
-    //     println!("State:");
-    //     println!("{state:#?}");
-
-    //     let items = parse_file(file, &state).unwrap();
-
-    //     println!("Items found:");
-    //     println!("{items:#?}");
-
-    //     for item in &items {
-    //         if let Item::Struct(item) = item {
-    //             let tokens = Dummy.generate_struct(item);
-
-    //             let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
-
-    //             println!("Generated impl:");
-    //             println!("{output}");
-    //         }
-    //     }
+                println!("Generated impl:");
+                println!("{output}");
+                println!("Parsed item: {item:#?}");
+            }
+        }
+    }
     // }
 }
