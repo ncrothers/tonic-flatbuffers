@@ -10,7 +10,10 @@ use winnow::{
 
 use crate::parse::{
     parser::{ParsedTypes, ParserState},
-    utils::{field_idx_to_offset, ident, item_ident, padding_bytes, whitespace_all, whitespace_and_comments_opt, Alignment, ByteSize, Namespace, OffsetType},
+    utils::{
+        field_idx_to_offset, ident, item_ident, padding_bytes, whitespace_all,
+        whitespace_and_comments_opt, Alignment, ByteSize, Namespace, OffsetType,
+    },
 };
 
 use super::{
@@ -43,7 +46,7 @@ impl<'a> Struct<'a> {
     pub fn position_fields(&mut self, parsed_types: &ParsedTypes) {
         for idx in 0..self.fields.len() {
             self.fields[idx].offset = field_idx_to_offset(idx as u16);
-    
+
             let size = self.fields[idx].size(parsed_types);
             let alignment = self.fields[idx].alignment(parsed_types);
 
@@ -51,7 +54,8 @@ impl<'a> Struct<'a> {
 
             self.pad_prev_field(idx, alignment);
 
-            self.fields[idx].offset = OffsetType::try_from(self.byte_size).expect("integer overflow for struct byte_size");
+            self.fields[idx].offset = OffsetType::try_from(self.byte_size)
+                .expect("integer overflow for struct byte_size");
             self.byte_size += size;
         }
 
@@ -63,14 +67,17 @@ impl<'a> Struct<'a> {
         let padding = padding_bytes(self.byte_size, alignment);
         self.byte_size += padding;
         if idx > 0 {
-            self.fields[idx-1].padding = padding;
+            self.fields[idx - 1].padding = padding;
         }
     }
 }
 
 impl<'a> ByteSize for Struct<'a> {
     fn size(&self, parsed_types: &ParsedTypes) -> usize {
-        self.fields.iter().map(|field| field.size(parsed_types)).sum()
+        self.fields
+            .iter()
+            .map(|field| field.size(parsed_types))
+            .sum()
     }
 }
 

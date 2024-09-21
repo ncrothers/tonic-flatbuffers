@@ -8,7 +8,8 @@ use winnow::{
 use crate::parse::{
     parser::{DeclType, ParsedTypes, ParserState},
     utils::{
-        ident, resolved_ident, string_literal, whitespace_all, whitespace_and_comments_opt, whitespace_and_comments_req, ByteSize, Namespace
+        ident, resolved_ident, string_literal, whitespace_all, whitespace_and_comments_opt,
+        whitespace_and_comments_req, ByteSize, Namespace,
     },
 };
 
@@ -83,9 +84,9 @@ impl<'a> ByteSize for Item<'a> {
         match self {
             Item::Enum(item) => item.size(parsed_types),
             Item::Struct(item) => item.size(parsed_types),
-            Item::Table(item) => todo!(),//item.size(parsed_types),
-            Item::Union(item) => todo!(),//item.size(parsed_types),
-            _ => unreachable!("make this an error instead of unreachable")
+            Item::Table(item) => todo!(), //item.size(parsed_types),
+            Item::Union(item) => todo!(), //item.size(parsed_types),
+            _ => unreachable!("make this an error instead of unreachable"),
         }
     }
 }

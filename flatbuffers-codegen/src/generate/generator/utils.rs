@@ -4,6 +4,8 @@ use convert_case::{Case, Casing};
 use lazy_static::lazy_static;
 use quote::format_ident;
 
+use crate::parse::{parser::NamedType, utils::Namespace};
+
 lazy_static! {
     static ref RESERVED: HashSet<&'static str> = HashSet::from([
         // https://doc.rust-lang.org/book/second-edition/appendix-01-keywords.html
@@ -89,11 +91,42 @@ lazy_static! {
     ]);
 }
 
+pub fn deconflict_name(ident: &str, case: Case) -> String {
+    let ident = ident.to_case(case);
+    if RESERVED.contains(ident.as_str()) {
+        format!("{ident}_")
+    } else {
+        ident
+    }
+}
+
 pub fn into_valid_ident(ident: &str, case: Case) -> syn::Ident {
     let ident = ident.to_case(case);
     if RESERVED.contains(ident.as_str()) {
         format_ident!("{ident}_")
     } else {
         syn::Ident::new(&ident, proc_macro2::Span::call_site())
+    }
+}
+
+pub fn into_valid_type(ident: &str) -> syn::Type {
+    if RESERVED.contains(ident) {
+        syn::parse_str(&format!("{ident}_")).unwrap()
+    } else {
+        syn::parse_str(&ident).unwrap()
+    }
+}
+
+pub fn named_type_to_rust_name(named_type: &NamedType, from_ns: &Namespace) -> String {
+    let path = from_ns.path_to(&named_type.namespace);
+
+    if path.is_empty() {
+        named_type.ident.to_owned()
+    } else {
+        format!(
+            "{}::{}",
+            path.join("::"),
+            deconflict_name(named_type.ident, Case::Pascal)
+        )
     }
 }

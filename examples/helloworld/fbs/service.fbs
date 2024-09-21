@@ -1,4 +1,4 @@
-include "service2.fbs";
+// include "service2.fbs";
 
 namespace example.service;
 
@@ -16,6 +16,10 @@ table Response {
     struct:string;
 }
 
+struct Struct2 {
+    foo:uint;
+}
+
 struct Struct1 {
     foo:uint32;
     struct:[uint:5];
@@ -25,6 +29,7 @@ struct Struct1 {
     bar4:bool;
     foo2:uint64;
     foo3:uint32;
+    foobar:Struct2;
     // hello:bla.Hello;
 }
 

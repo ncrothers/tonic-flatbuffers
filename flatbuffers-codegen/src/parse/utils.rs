@@ -60,6 +60,42 @@ impl<'a> Namespace<'a> {
             components: Vec::new(),
         }
     }
+
+    /// Returns the relative path needed to get to the other namespace.
+    /// If they are the same, return `None`
+    pub fn path_to(&self, other: &Namespace<'a>) -> Vec<&'a str> {
+        let mut idx = 0;
+        let mut other_idx = 0;
+
+        // let mut segments = Vec::new();
+
+        // Skip common ancestors
+        while idx < self.components.len()
+            && other_idx < other.components.len()
+            && self.components[idx] == other.components[other_idx]
+        {
+            idx += 1;
+            other_idx += 1;
+        }
+
+        let n_super = self.components.len() - idx;
+        // Add `super`s by consuming from the `self` path
+        let mut segments = vec!["super"; n_super];
+        // for _ in idx..self.components.len() {
+        //     segments.push("super");
+        // }
+
+        // Add the remainder of the other path
+        segments.extend(other.components[other_idx..].iter());
+
+        // if segments.is_empty() {
+        //     None
+        // } else {
+        //     Some(segments.join("::"))
+        // }
+
+        segments
+    }
 }
 
 impl<'a> From<&'a str> for Namespace<'a> {
@@ -116,8 +152,10 @@ pub fn field_idx_to_offset(field_idx: OffsetType) -> OffsetType {
     let fixed_fields = 2 * SIZE_BYTES as u16;
     let offset = OffsetType::checked_add(
         fixed_fields,
-        OffsetType::checked_mul(field_idx, SIZE_BYTES as OffsetType).expect("integer overflow when calculating offset")
-    ).expect("integer overflow when calculating offset");
+        OffsetType::checked_mul(field_idx, SIZE_BYTES as OffsetType)
+            .expect("integer overflow when calculating offset"),
+    )
+    .expect("integer overflow when calculating offset");
 
     offset
 }
@@ -508,5 +546,19 @@ mod tests {
     #[case::none("", Vec::new())]
     fn comments_pass(#[case] item_str: &str, #[case] output: Vec<&str>) {
         assert_eq!(whitespace_and_comments_opt.parse(item_str), Ok(output));
+    }
+
+    #[rstest]
+    #[case("a.b.c".into(), "d.e".into(), vec!["super", "super", "super", "d", "e"])]
+    #[case("a.b.c".into(), "a.b.c".into(), Vec::new())]
+    #[case("a.b.c".into(), "a.b.c.d".into(), vec!["d"])]
+    #[case("a.b.c.d".into(), "a.b.c".into(), vec!["super"])]
+    #[case("".into(), "d.e".into(), vec!["d", "e"])]
+    fn namespace_relative_path(
+        #[case] source: Namespace,
+        #[case] target: Namespace,
+        #[case] output: Vec<&str>,
+    ) {
+        assert_eq!(source.path_to(&target), output);
     }
 }

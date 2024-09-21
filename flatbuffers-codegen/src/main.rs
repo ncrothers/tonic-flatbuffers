@@ -9,7 +9,8 @@ use flatbuffers_codegen::{
     parse::{
         flatbuffers::item::Item,
         parser::{
-            align_structs, collect_includes, get_namespaced_decls, load_file_strs, parse_file, ParsedTypes, ParserState
+            align_structs, collect_includes, get_namespaced_decls, load_file_strs, parse_file,
+            ParsedTypes, ParserState,
         },
         utils::Namespace,
     },
@@ -70,7 +71,7 @@ fn main() {
 
     let include_paths = vec![PathBuf::from("../examples/helloworld/fbs")];
 
-    let files_to_compile = glob::glob("../examples/helloworld/fbs/simple.fbs")
+    let files_to_compile = glob::glob("../examples/helloworld/fbs/service.fbs")
         .unwrap()
         .map(|path| {
             let path = path?;
@@ -127,17 +128,16 @@ fn main() {
 
     align_structs(&parsed_items);
 
-    for (ns, items) in parsed_items.iter() {
-        for item in items.values() {
-            if let Item::Struct(item) = &*item.borrow() {
-                let tokens = Dummy.generate_struct(item, &parsed_items);
-    
-                let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
+    for (ns, item) in parsed_items.iter() {
+        if let Item::Struct(item) = &*item.borrow() {
+            let tokens = Dummy.generate_struct(item, &parsed_items);
 
-                println!("Generated impl:");
-                println!("{output}");
-                println!("Parsed item: {item:#?}");
-            }
+            // let output = tokens.to_string();
+            let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
+
+            println!("Generated impl:");
+            println!("{output}");
+            // println!("Parsed item: {item:#?}");
         }
     }
     // }

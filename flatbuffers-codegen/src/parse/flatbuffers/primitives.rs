@@ -159,6 +159,22 @@ impl ScalarType {
                 | Self::UInt64
         )
     }
+
+    pub fn to_rust_type(&self) -> &'static str {
+        match self {
+            ScalarType::Int8 => "i8",
+            ScalarType::UInt8 => "u8",
+            ScalarType::Bool => "bool",
+            ScalarType::Int16 => "i16",
+            ScalarType::UInt16 => "u16",
+            ScalarType::Int32 => "i32",
+            ScalarType::UInt32 => "u32",
+            ScalarType::Float32 => "f32",
+            ScalarType::Int64 => "i64",
+            ScalarType::UInt64 => "u64",
+            ScalarType::Float64 => "f64",
+        }
+    }
 }
 
 impl ByteSize for ScalarType {

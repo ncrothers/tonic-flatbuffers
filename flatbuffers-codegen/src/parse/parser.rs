@@ -2,7 +2,8 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fs,
-    path::{Path, PathBuf}, rc::Rc,
+    path::{Path, PathBuf},
+    rc::Rc,
 };
 
 use winnow::{
@@ -188,7 +189,7 @@ impl<'a> Default for ParserState<'a> {
 }
 
 #[derive(Debug, Default)]
-pub struct ParsedTypes<'a>(pub(crate) HashMap<Namespace<'a>, HashMap<&'a str, Rc<RefCell<Item<'a>>>>>);
+pub struct ParsedTypes<'a>(pub(crate) Vec<(Namespace<'a>, Rc<RefCell<Item<'a>>>)>);
 
 impl<'a> ParsedTypes<'a> {
     pub fn new() -> Self {
@@ -196,11 +197,8 @@ impl<'a> ParsedTypes<'a> {
     }
 
     pub fn insert(&mut self, item: Item<'a>) {
-        if let Some((ns, ident)) = item
-            .ident()
-            .and_then(|ident| item.namespace().map(|ns| (ns, ident)))
-        {
-            self.0.entry(ns.clone()).or_default().insert(ident, Rc::new(RefCell::new(item)));
+        if let Some(ns) = item.namespace() {
+            self.0.push((ns.to_owned(), Rc::new(RefCell::new(item))));
         }
     }
 
@@ -210,11 +208,17 @@ impl<'a> ParsedTypes<'a> {
     /// the file the parent type was defined
     pub fn resolve_named(&self, named_type: &NamedType<'_>) -> Option<Rc<RefCell<Item<'a>>>> {
         self.0
-            .get(&named_type.namespace)
-            .and_then(|items| items.get(named_type.ident).cloned())
+            .iter()
+            .find(|(ns, item)| {
+                named_type.namespace == *ns && item.borrow().ident() == Some(named_type.ident)
+            })
+            .map(|(_, item)| Rc::clone(&item))
+        // self.0
+        //     .get(&named_type.namespace)
+        //     .and_then(|items| items.iter().find(|item| item.borrow().ident() == Some(named_type.ident)).cloned())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&Namespace<'a>, &HashMap<&'a str, Rc<RefCell<Item<'a>>>>)> {
+    pub fn iter(&self) -> impl Iterator<Item = &(Namespace<'a>, Rc<RefCell<Item<'a>>>)> {
         self.0.iter()
     }
 }
@@ -388,14 +392,12 @@ fn resolve_include(path_str: &str, include_paths: &[PathBuf]) -> anyhow::Result<
 }
 
 pub fn align_structs(items: &ParsedTypes) {
-    for ns_items in items.0.values() {
-        for item in ns_items.values() {
-            match &mut *item.borrow_mut() {
-                Item::Struct(struct_) => {
-                    struct_.position_fields(&items);
-                }
-                _ => ()
+    for (_ns, item) in &items.0 {
+        match &mut *item.borrow_mut() {
+            Item::Struct(struct_) => {
+                struct_.position_fields(&items);
             }
+            _ => (),
         }
     }
 }
