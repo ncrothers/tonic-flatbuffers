@@ -160,9 +160,21 @@ pub fn field_idx_to_offset(field_idx: OffsetType) -> OffsetType {
     offset
 }
 
-/// Efficient way to calculate the number of bytes needed to pad
-pub(crate) fn padding_bytes(buf_size: usize, scalar_size: usize) -> usize {
-    usize::wrapping_add(!buf_size, 1) & (scalar_size - 1)
+/// Calculate the number of bytes needed to pad
+pub fn padding_bytes(buf_size: usize, scalar_size: usize) -> usize {
+    // let remainder = buf_size % scalar_size;
+    (scalar_size - (buf_size % scalar_size)) % scalar_size
+
+    // Method in the original C++ code:
+    // Only works when scalar_size is a power of 2, which _should_ always be true unless
+    // the user adds `force_align` to a non-power of 2. In all other cases, the fields of
+    // a struct will always have a power of 2 alignment, since the only possible types
+    // a struct field can have is:
+    // 1. scalar (all powers of 2)
+    // 2. enum (all powers of 2)
+    // 3. array (type is one of the others)
+    // 4. struct (type is any of the above, which all conform to powers of 2)
+    // usize::wrapping_add(!buf_size, 1) & (scalar_size - 1)
 }
 
 pub trait ByteSize {
@@ -560,5 +572,15 @@ mod tests {
         #[case] output: Vec<&str>,
     ) {
         assert_eq!(source.path_to(&target), output);
+    }
+
+    #[rstest]
+    #[case((3, 4), 1)]
+    #[case((3, 5), 2)]
+    #[case((0, 5), 0)]
+    #[case((3, 1), 0)]
+    #[case((63, 4), 1)]
+    fn padding(#[case] input: (usize, usize), #[case] output: usize) {
+        assert_eq!(padding_bytes(input.0, input.1), output);
     }
 }

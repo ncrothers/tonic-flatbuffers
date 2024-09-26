@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, process::exit,
 };
 
 use flatbuffers_codegen::{
@@ -12,7 +12,7 @@ use flatbuffers_codegen::{
             align_structs, collect_includes, get_namespaced_decls, load_file_strs, parse_file,
             ParsedTypes, ParserState,
         },
-        utils::Namespace,
+        utils::{padding_bytes, Namespace},
     },
 };
 

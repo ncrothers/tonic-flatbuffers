@@ -11,7 +11,6 @@ use crate::{
             r#struct::Struct,
         },
         parser::ParsedTypes,
-        utils::ByteSize,
     },
 };
 
@@ -122,8 +121,8 @@ fn main_impl(struct_name: &syn::Type, struct_: &Struct, parsed_types: &ParsedTyp
     let field_types = struct_.fields.iter().map(|field| match &field.field_type {
         StructFieldType::Array(arr) => {
             let typename = match &arr.item_type {
-                ArrayItemType::Named(named) => &named_type_to_rust_name(named, &struct_.namespace),
-                ArrayItemType::Scalar(scalar) => scalar.to_rust_type(),
+                ArrayItemType::Named(named) => named_type_to_rust_name(named, &struct_.namespace),
+                ArrayItemType::Scalar(scalar) => scalar.to_rust_type().to_owned(),
             };
             syn::parse_str(&format!("&[{}; {}]", typename, arr.length)).unwrap()
         }
@@ -143,11 +142,9 @@ fn main_impl(struct_name: &syn::Type, struct_: &Struct, parsed_types: &ParsedTyp
             let (get_return_type, get_self, get_body, set_type, set_body) = match &field.field_type {
                 StructFieldType::Array(arr) => {
                     let typename = match &arr.item_type {
-                        ArrayItemType::Named(named) => {
-                            &named_type_to_rust_name(named, &struct_.namespace)
-                        }
+                        ArrayItemType::Named(named) => named_type_to_rust_name(named, &struct_.namespace),
                         ArrayItemType::Scalar(scalar) => {
-                            scalar.to_rust_type()
+                            scalar.to_rust_type().to_owned()
                         }
                     };
                     let offset = field.offset as usize;
