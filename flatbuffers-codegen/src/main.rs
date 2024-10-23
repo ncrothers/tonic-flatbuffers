@@ -129,15 +129,30 @@ fn main() {
     align_structs(&parsed_items);
 
     for (ns, item) in parsed_items.iter() {
-        if let Item::Struct(item) = &*item.borrow() {
-            let tokens = Dummy.generate_struct(item, &parsed_items);
+        match &*item.borrow() {
+            Item::Struct(item) => {
+                let tokens = Dummy.generate_struct(item, &parsed_items);
+        
+                // let output = tokens.to_string();
+                let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
+        
+                println!("Generated impl:");
+                println!("{output}");
+                // println!("Parsed item: {item:#?}");
+            }
+            Item::Enum(item) => {
+                let tokens = Dummy.generate_enum(item, &parsed_items);
 
-            // let output = tokens.to_string();
-            let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
-
-            println!("Generated impl:");
-            println!("{output}");
-            // println!("Parsed item: {item:#?}");
+                println!("{}", tokens);
+        
+                // let output = tokens.to_string();
+                let output = prettyplease::unparse(&syn::parse2(tokens).unwrap());
+        
+                println!("Generated impl:");
+                println!("{output}");
+                // println!("Parsed item: {item:#?}");
+            }
+            _ => ()
         }
     }
     // }

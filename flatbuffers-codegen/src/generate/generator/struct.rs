@@ -21,7 +21,7 @@ pub fn generate_struct(item: &Struct, parsed_types: &ParsedTypes) -> TokenStream
 
     println!("Struct [{}] byte size: {struct_size}", item.name);
 
-    let struct_name_str = deconflict_name(item.name, Case::Pascal);
+    let struct_name_str = deconflict_name(item.name, Some(Case::Pascal));
     let struct_name = syn::Type::Path(syn::parse_str(&struct_name_str).unwrap());
 
     // Generate the debug implementation
@@ -34,7 +34,7 @@ pub fn generate_struct(item: &Struct, parsed_types: &ParsedTypes) -> TokenStream
         debug(&struct_name, &struct_name_str, item),
         follow(&struct_name),
         verifiable(&struct_name),
-        main_impl(&struct_name, &item, parsed_types),
+        main_impl(&struct_name, item, parsed_types),
     ];
 
     impls.into_iter().fold(TokenStream::new(), |agg, tokens| {

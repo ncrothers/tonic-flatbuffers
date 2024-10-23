@@ -3,6 +3,7 @@ pub mod generate {
     pub use traits::*;
 
     mod generator {
+        pub mod r#enum;
         pub mod r#struct;
 
         pub mod utils;

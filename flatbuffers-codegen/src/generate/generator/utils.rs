@@ -91,12 +91,17 @@ lazy_static! {
     ]);
 }
 
-pub fn deconflict_name(ident: &str, case: Case) -> String {
-    let ident = ident.to_case(case);
-    if RESERVED.contains(ident.as_str()) {
-        format!("{ident}_")
+pub fn deconflict_name(ident: &str, case: Option<Case>) -> String {
+    let ident = if let Some(case) = case {
+        &ident.to_case(case)
     } else {
         ident
+    };
+
+    if RESERVED.contains(ident) {
+        format!("{ident}_")
+    } else {
+        ident.to_owned()
     }
 }
 
@@ -126,7 +131,7 @@ pub fn named_type_to_rust_name(named_type: &NamedType, from_ns: &Namespace) -> S
         format!(
             "{}::{}",
             path.join("::"),
-            deconflict_name(named_type.ident, Case::Pascal)
+            deconflict_name(named_type.ident, Some(Case::Pascal))
         )
     }
 }

@@ -1,5 +1,6 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, marker::PhantomData, str::FromStr};
 
+use quote::quote;
 use winnow::{
     combinator::{cut_err, opt, separated, trace},
     error::{AddContext, ContextError, ErrMode, StrContext, StrContextValue},
@@ -20,60 +21,111 @@ use super::{
 };
 
 #[derive(Debug, PartialEq)]
-pub struct EnumVariant<'a, T> {
+pub struct EnumVariant<'a> {
     pub name: &'a str,
-    pub idx: Option<T>,
+    // Using `i128` to ensure all values for any data type fit here
+    pub idx: Option<i128>,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
 }
 
-#[derive(Debug, PartialEq)]
-pub enum EnumData<'a> {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EnumBaseType {
     /// Alias of `byte`
-    Int8(Vec<EnumVariant<'a, i8>>),
+    Int8,
     /// Alias of `ubyte`
-    UInt8(Vec<EnumVariant<'a, u8>>),
+    UInt8,
     /// Alias of `short`
-    Int16(Vec<EnumVariant<'a, i16>>),
+    Int16,
     /// Alias of `ushort`
-    UInt16(Vec<EnumVariant<'a, u16>>),
+    UInt16,
     /// Alias of `int`
-    Int32(Vec<EnumVariant<'a, i32>>),
+    Int32,
     /// Alias of `uint`
-    UInt32(Vec<EnumVariant<'a, u32>>),
+    UInt32,
     /// Alias of `long`
-    Int64(Vec<EnumVariant<'a, i64>>),
+    Int64,
     /// Alias of `ulong`
-    UInt64(Vec<EnumVariant<'a, u64>>),
+    UInt64,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Enum<'a> {
     pub name: &'a str,
     pub namespace: Namespace<'a>,
-    pub variants: EnumData<'a>,
+    pub variants: Vec<EnumVariant<'a>>,
+    pub base_type: EnumBaseType,
     pub comments: Vec<&'a str>,
     pub attributes: Vec<Attribute<'a>>,
 }
 
-impl<'a> ByteSize for Enum<'a> {
-    fn size(&self, _parsed_types: &ParsedTypes) -> usize {
-        match self.variants {
-            EnumData::Int8(_) | EnumData::UInt8(_) => 1,
-            EnumData::Int16(_) | EnumData::UInt16(_) => 2,
-            EnumData::Int32(_) | EnumData::UInt32(_) => 4,
-            EnumData::Int64(_) | EnumData::UInt64(_) => 8,
+impl EnumBaseType {
+    pub fn from_scalar_type(scalar_type: ScalarType) -> Option<Self> {
+        match scalar_type {
+            ScalarType::Int8 => Some(Self::Int8),
+            ScalarType::UInt8 => Some(Self::UInt8),
+            ScalarType::Int16 => Some(Self::Int16),
+            ScalarType::UInt16 => Some(Self::UInt16),
+            ScalarType::Int32 => Some(Self::Int32),
+            ScalarType::UInt32 => Some(Self::UInt32),
+            ScalarType::Int64 => Some(Self::Int64),
+            ScalarType::UInt64 => Some(Self::UInt64),
+            _ => None,
+        }
+    }
+
+    pub fn is_valid(&self, value: i128) -> bool {
+        match self {
+            EnumBaseType::Int8 => i8::try_from(value).is_ok(),
+            EnumBaseType::UInt8 => u8::try_from(value).is_ok(),
+            EnumBaseType::Int16 => i16::try_from(value).is_ok(),
+            EnumBaseType::UInt16 => u16::try_from(value).is_ok(),
+            EnumBaseType::Int32 => i32::try_from(value).is_ok(),
+            EnumBaseType::UInt32 => u32::try_from(value).is_ok(),
+            EnumBaseType::Int64 => i64::try_from(value).is_ok(),
+            EnumBaseType::UInt64 => u64::try_from(value).is_ok(),
         }
     }
 }
 
-fn enum_variant<'a, 's: 'a, T>(
+impl<'a> Enum<'a> {
+    /// Return the data type of this Enum as a [`syn::Type`].
+    pub fn data_type(&self) -> syn::Type {
+        // Unwrap is safe because this parse is 
+        match self.base_type {
+            EnumBaseType::Int8 => syn::parse2(quote! { i8 }).unwrap(),
+            EnumBaseType::UInt8 => syn::parse2(quote! { u8 }).unwrap(),
+            EnumBaseType::Int16 => syn::parse2(quote! { i16 }).unwrap(),
+            EnumBaseType::UInt16 => syn::parse2(quote! { u16 }).unwrap(),
+            EnumBaseType::Int32 => syn::parse2(quote! { i32 }).unwrap(),
+            EnumBaseType::UInt32 => syn::parse2(quote! { u32 }).unwrap(),
+            EnumBaseType::Int64 => syn::parse2(quote! { i64 }).unwrap(),
+            EnumBaseType::UInt64 => syn::parse2(quote! { u64 }).unwrap(),
+        }
+    }
+
+    /// Returns whether the bitflags attribute is present on this enum.
+    pub fn is_bitflags(&self) -> bool {
+        self.attributes.iter().any(|attr| matches!(attr, Attribute::BitFlags))
+    }
+}
+
+impl<'a> ByteSize for Enum<'a> {
+    fn size(&self, _parsed_types: &ParsedTypes) -> usize {
+        match self.base_type {
+            EnumBaseType::Int8 | EnumBaseType::UInt8 => 1,
+            EnumBaseType::Int16 | EnumBaseType::UInt16 => 2,
+            EnumBaseType::Int32 | EnumBaseType::UInt32 => 4,
+            EnumBaseType::Int64 | EnumBaseType::UInt64 => 8,
+        }
+    }
+}
+
+fn enum_variant<'a, 's: 'a>(
     state: &'a ParserState<'s>,
     field_idents: &'a mut HashSet<&'s str>,
-) -> impl Parser<&'s str, EnumVariant<'s, T>, ContextError> + 'a
-where
-    T: FromStr + TypeName,
-{
+    base_type: EnumBaseType,
+) -> impl Parser<&'s str, EnumVariant<'s>, ContextError> + 'a {
     move |input: &mut _| {
         trace("enum_variant", |input: &mut _| {
             let comments = whitespace_and_comments_opt(input)?;
@@ -105,7 +157,7 @@ where
                 whitespace_and_comments_opt(input)?;
 
                 let idx =
-                    cut_err(take_while(1.., |c: char| c.is_ascii_digit() || c == '.').parse_to())
+                    cut_err(take_while(1.., |c: char| c.is_ascii_digit() || c == '.').parse_to().verify(|idx| base_type.is_valid(*idx)))
                         .parse_next(input)?;
 
                 Some(idx)
@@ -165,6 +217,9 @@ pub fn enum_item<'a, 's: 'a>(
                 ));
             }
 
+            // Unwrap is safe because we've already verified the type is an integer
+            let base_type = EnumBaseType::from_scalar_type(scalar).unwrap();
+
             let attrs = opt(attribute_list(state, AttributeTarget::EnumItem))
                 .parse_next(input)?
                 .map(|attrs| attrs.attrs);
@@ -174,12 +229,13 @@ pub fn enum_item<'a, 's: 'a>(
                 .context(StrContext::Expected(StrContextValue::StringLiteral("{")))
                 .parse_next(input)?;
 
-            fn parse_variants<'a, 's: 'a, T: FromStr + TypeName>(
+            fn parse_variants<'a, 's: 'a>(
                 state: &'a ParserState<'s>,
-            ) -> impl Parser<&'s str, Vec<EnumVariant<'s, T>>, ContextError> + 'a {
+                base_type: EnumBaseType,
+            ) -> impl Parser<&'s str, Vec<EnumVariant<'s>>, ContextError> + 'a {
                 move |input: &mut _| {
                     let mut field_idents = HashSet::new();
-                    let variants = separated(0.., enum_variant(state, &mut field_idents), ",")
+                    let variants = separated(0.., enum_variant(state, &mut field_idents, base_type), ",")
                         .parse_next(input)?;
                     // Consume a trailing comma, if present
                     opt(literal(",")).parse_next(input)?;
@@ -188,66 +244,72 @@ pub fn enum_item<'a, 's: 'a>(
                 }
             }
 
-            // Parse variants according to the data type
-            let variants = match scalar {
-                ScalarType::Int8 => EnumData::Int8(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("int8"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                ScalarType::UInt8 => EnumData::UInt8(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("uint8"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                ScalarType::Int16 => EnumData::Int16(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("int16"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                ScalarType::UInt16 => EnumData::UInt16(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("uint16"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                ScalarType::Int32 => EnumData::Int32(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("int32"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                ScalarType::UInt32 => EnumData::UInt32(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("uint32"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                ScalarType::Int64 => EnumData::Int64(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("int64"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                ScalarType::UInt64 => EnumData::UInt64(
-                    cut_err(
-                        parse_variants(state)
-                            .context(StrContext::Expected(StrContextValue::Description("uint64"))),
-                    )
-                    .parse_next(input)?,
-                ),
-                _ => unreachable!(),
-            };
+            let variants = cut_err(
+                    parse_variants(state, base_type)
+                        .context(StrContext::Expected(StrContextValue::Description("int8"))),
+                )
+                .parse_next(input)?;
+
+            // // Parse variants according to the data type
+            // let variants = match scalar {
+            //     ScalarType::Int8 => EnumBaseType::Int8(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("int8"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     ScalarType::UInt8 => EnumBaseType::UInt8(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("uint8"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     ScalarType::Int16 => EnumBaseType::Int16(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("int16"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     ScalarType::UInt16 => EnumBaseType::UInt16(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("uint16"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     ScalarType::Int32 => EnumBaseType::Int32(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("int32"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     ScalarType::UInt32 => EnumBaseType::UInt32(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("uint32"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     ScalarType::Int64 => EnumBaseType::Int64(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("int64"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     ScalarType::UInt64 => EnumBaseType::UInt64(
+            //         cut_err(
+            //             parse_variants(state)
+            //                 .context(StrContext::Expected(StrContextValue::Description("uint64"))),
+            //         )
+            //         .parse_next(input)?,
+            //     ),
+            //     _ => unreachable!(),
+            // };
 
             whitespace_and_comments_opt(input)?;
 
@@ -262,6 +324,7 @@ pub fn enum_item<'a, 's: 'a>(
                 name: ident,
                 namespace: state.namespace(),
                 variants,
+                base_type,
                 comments,
                 attributes: attrs.unwrap_or_default(),
             })
@@ -286,7 +349,7 @@ mod tests {
         Enum {
             name: "Hello",
             namespace: "".into(),
-            variants: EnumData::UInt32(vec![
+            variants: vec![
                 EnumVariant {
                     name: "Variant1",
                     idx: None,
@@ -305,7 +368,8 @@ mod tests {
                     comments: Vec::new(),
                     attributes: Vec::new(),
                 },
-            ]),
+            ],
+            base_type: EnumBaseType::UInt32,
             comments: Vec::new(),
             attributes: Vec::new(),
         }
@@ -321,7 +385,7 @@ mod tests {
         Enum {
             name: "Hello_There",
             namespace: "".into(),
-            variants: EnumData::Int32(vec![
+            variants:vec![
                 EnumVariant {
                     name: "Variant1",
                     idx: None,
@@ -334,7 +398,8 @@ mod tests {
                     comments: vec!["Comment"],
                     attributes: Vec::new(),
                 },
-            ]),
+            ],
+            base_type: EnumBaseType::Int32,
             comments: vec!["This is a comment!"],
             attributes: Vec::new(),
         }
@@ -347,7 +412,7 @@ mod tests {
         Enum {
             name: "Hello_There",
             namespace: "".into(),
-            variants: EnumData::Int32(vec![
+            variants: vec![
                 EnumVariant {
                     name: "Variant1",
                     idx: Some(0),
@@ -360,7 +425,8 @@ mod tests {
                     comments: Vec::new(),
                     attributes: Vec::new(),
                 },
-            ]),
+            ],
+            base_type: EnumBaseType::Int32,
             comments: Vec::new(),
             attributes: Vec::new(),
         }
@@ -373,7 +439,7 @@ mod tests {
         Enum {
             name: "Hello_There",
             namespace: "".into(),
-            variants: EnumData::Int32(vec![
+            variants: vec![
                 EnumVariant {
                     name: "Variant1",
                     idx: None,
@@ -386,7 +452,8 @@ mod tests {
                     comments: Vec::new(),
                     attributes: vec![Attribute::Custom { name: "custom_attr", value: Some("foo") }],
                 },
-            ]),
+            ],
+            base_type: EnumBaseType::Int32,
             comments: Vec::new(),
             attributes: vec![Attribute::BitFlags],
         }
@@ -426,6 +493,12 @@ mod tests {
     #[case::duplicate_variant(
         r#"enum Hello_There : int8 {
             Variant1,
+            Variant1,
+        }"#
+    )]
+    #[case::value_out_of_range(
+        r#"enum Hello_There : uint8 {
+            Variant1 = 256,
             Variant1,
         }"#
     )]
