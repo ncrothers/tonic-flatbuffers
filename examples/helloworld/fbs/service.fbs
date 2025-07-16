@@ -14,7 +14,9 @@ root_type Request;
 root_type Response;
 
 rpc_service HelloWorldStreaming {
+    /// Documentation comment
     HelloSingle(Request):Response (streaming: "none");
+    // Comment
     HelloStreamServer(Request): Response (streaming: "server");
     HelloStreamClient(Request): Response (streaming: "client");
     HelloStreamBidirectional(Request): Response (streaming: "bidi");
