@@ -420,7 +420,7 @@ impl Builder {
                 .emit_rerun_if_changed(false)
                 .generate_default_stubs(self.generate_default_stubs)
                 .out_dir(&out_dir)
-                .compile(&[&format!("{out_dir}/generated.proto")], &[&out_dir])?;
+                .compile_protos(&[&format!("{out_dir}/generated.proto")], &[&out_dir])?;
 
             for path in std::fs::read_dir(&out_dir)?.flatten() {
                 if let Ok(file_type) = path.file_type() {
