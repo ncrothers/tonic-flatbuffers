@@ -6,4 +6,5 @@ repository = "https://github.com/ncrothers/tonic-flatbuffers.git"
 license = "MIT"
 
 [workspace]
+resolver = "2"
 members = ["tonic-flatbuffers", "tonic-flatbuffers-build", "examples/helloworld"]

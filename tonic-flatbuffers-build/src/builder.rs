@@ -289,7 +289,22 @@ impl Builder {
 
         // Convert all flatbuffer RPC definitions into protobuf RPC definitions
         for file in fbs {
-            let file = std::fs::read_to_string(file)?.replace(['\r', '\n'], "");
+            let file = std::fs::read_to_string(file)?;
+
+            // cleanup comments above rpc definition using // or ///
+            let file = file
+                .lines()
+                .filter_map(|line| {
+                    if !line.trim_start().starts_with("//") {
+                        Some(line.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join("\n");
+
+            let file = file.replace(['\r', '\n'], "");
 
             let mut service_bufs = Vec::new();
             let mut idx = 0;
