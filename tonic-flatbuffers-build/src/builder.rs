@@ -184,6 +184,7 @@ pub fn configure() -> Builder {
         build_client: true,
         build_server: true,
         emit_rerun_if_changed: true,
+        gen_object_api: false,
         generate_default_stubs: false,
         out_dir: None,
     }
@@ -193,6 +194,7 @@ pub struct Builder {
     pub(crate) build_client: bool,
     pub(crate) build_server: bool,
     pub(crate) emit_rerun_if_changed: bool,
+    pub(crate) gen_object_api: bool,
     pub(crate) generate_default_stubs: bool,
 
     out_dir: Option<PathBuf>,
@@ -237,6 +239,16 @@ impl Builder {
         self
     }
 
+    /// Enable or disable generation of FlatBuffers Object API
+    ///
+    /// Generate an additional object-based API. This API is more convenient for object construction
+    /// and mutation than the base API, at the cost of efficiency (object allocation).
+    /// Recommended only to be used if other options are insufficient.
+    pub fn gen_object_api(mut self, enable: bool) -> Self {
+        self.gen_object_api = enable;
+        self
+    }
+
     /// Enable or disable directing service generation to providing a default implementation for service methods.
     /// When this is false all gRPC methods must be explicitly implemented.
     /// When this is true any unimplemented service methods will return 'unimplemented' gRPC error code.
@@ -259,6 +271,10 @@ impl Builder {
         // Set options
         if !self.emit_rerun_if_changed {
             flatbuffers_opts = flatbuffers_opts.supress_buildrs_directives();
+        }
+
+        if self.gen_object_api {
+            flatbuffers_opts = flatbuffers_opts.gen_object_api();
         }
 
         if let Some(path) = self.out_dir.as_ref() {
