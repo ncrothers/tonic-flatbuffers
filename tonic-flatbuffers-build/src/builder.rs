@@ -444,7 +444,7 @@ impl Builder {
 
             std::fs::write(format!("{out_dir}/generated.proto"), file_str)?;
 
-            tonic_build::configure()
+            tonic_prost_build::configure()
                 .build_client(true)
                 .build_server(true)
                 .codec_path("::tonic_flatbuffers::codec::FlatCodec")
